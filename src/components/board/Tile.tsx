@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
-import { TileDefinition, TileState, PlayerState } from '../../types/game';
+import { TileDefinition, TileState } from '../../types/game';
 import { formatINR } from '../../lib/format';
 import { GROUP_COLORS, TILE_EMBLEMS } from '../../lib/tiles';
-import { PlayerToken } from './PlayerToken';
 
 export type TileOrientation = 'bottom' | 'left' | 'top' | 'right';
 
 interface Props {
   definition: TileDefinition;
   state: TileState;
-  playersOnTile: PlayerState[];
   isHighlighted?: boolean;
   highlightColor?: string;
   ownerColor?: string;
@@ -79,7 +77,6 @@ const HotelIcon: React.FC<{ vertical: boolean }> = ({ vertical }) => (
 export const Tile: React.FC<Props> = ({
   definition,
   state,
-  playersOnTile,
   isHighlighted,
   highlightColor,
   ownerColor,
@@ -215,14 +212,6 @@ export const Tile: React.FC<Props> = ({
       )}
 
 
-      {/* Tokens */}
-      {playersOnTile.length > 0 && (
-        <div className="pointer-events-none absolute inset-0 z-30 flex flex-wrap content-center items-center justify-center gap-[2px] p-[6%]">
-          {playersOnTile.map((p) => (
-            <PlayerToken key={p.id} tokenId={p.tokenId} color={p.color} name={p.name} size="board" className="animate-token-hop" />
-          ))}
-        </div>
-      )}
     </button>
   );
 };

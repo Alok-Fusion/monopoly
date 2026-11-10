@@ -37,6 +37,9 @@ import {
   findTrade,
   proposalProblem,
   tradeStillPossible,
+  colorTaken,
+  nameTaken,
+  uniqueName,
 } from './rules';
 import { formatINR, formatTeamName } from '../lib/format';
 
@@ -72,6 +75,24 @@ function freshTiles(): Record<number, TileState> {
   return Object.fromEntries(
     Array.from({ length: BOARD_SIZE }, (_, i) => [i, { ownerId: null, houses: 0, mortgaged: false }])
   );
+}
+
+/** First player colour nobody in the room is using. */
+function freeColor(state: GameState): string {
+  return PLAYER_COLORS.find((c) => !colorTaken(state, c)) ?? PLAYER_COLORS[Object.keys(state.players).length % PLAYER_COLORS.length]!;
+}
+
+/** Renames / recolours later duplicates so every player is unique (seat order decides who keeps theirs). */
+function ensureUniqueIdentities(state: GameState) {
+  const seen: PlayerState[] = [];
+  state.playerOrder.forEach((id) => {
+    const p = state.players[id];
+    if (!p) return;
+    const view = { ...state, players: Object.fromEntries(seen.map((o) => [o.id, o])) } as GameState;
+    if (nameTaken(view, p.name)) p.name = uniqueName(view, p.name);
+    if (colorTaken(view, p.color)) p.color = PLAYER_COLORS.find((c) => !colorTaken(view, c)) ?? p.color;
+    seen.push(p);
+  });
 }
 
 function makePlayer(profile: PlayerProfile, cash: number, extra: Partial<PlayerState> = {}): PlayerState {
@@ -501,6 +522,8 @@ function baseReducer(state: GameState, action: GameAction): GameState {
           addLog(next, { type: 'SYSTEM', message: 'Teams were balanced automatically.' });
         }
       }
+
+      ensureUniqueIdentities(next);
 
       if (next.settings.randomizePlayerOrder) {
         for (let i = next.playerOrder.length - 1; i > 0; i--) {
@@ -1232,11 +1255,10 @@ function baseReducer(state: GameState, action: GameAction): GameState {
       if (next.playerOrder.length >= cap) return state;
 
       const players = Object.values(next.players);
-      const usedNames = new Set(players.map((p) => p.name));
       const usedColors = new Set(players.map((p) => p.color));
       const usedTokens = new Set(players.map((p) => p.tokenId));
       const id = uid('bot');
-      const name = BOT_NAMES.find((n) => !usedNames.has(n)) ?? `Bot ${players.length + 1}`;
+      const name = BOT_NAMES.find((n) => !nameTaken(next, n)) ?? uniqueName(next, 'Bot');
       const color = PLAYER_COLORS.find((c) => !usedColors.has(c)) ?? PLAYER_COLORS[players.length % PLAYER_COLORS.length]!;
       const tokenId = TOKENS.find((t) => !usedTokens.has(t)) ?? TOKENS[players.length % TOKENS.length]!;
 
@@ -1259,6 +1281,7 @@ function baseReducer(state: GameState, action: GameAction): GameState {
       const existing = next.players[action.profile.id];
       if (existing) {
         existing.connected = true;
+        delete existing.disconnectedAt;
         return next;
       }
       if (next.phase !== 'LOBBY') return state;
@@ -1266,38 +1289,45 @@ function baseReducer(state: GameState, action: GameAction): GameState {
       if (next.playerOrder.length >= cap) return state;
 
       const players = Object.values(next.players);
-      const usedColors = new Set(players.map((p) => p.color));
       const counts = Object.fromEntries(ALL_TEAMS.map((t) => [t, 0])) as Record<TeamId, number>;
       players.forEach((p) => p.teamId && (counts[p.teamId] += 1));
       const teamId = ALL_TEAMS.find((t) => counts[t] < 2) ?? 'team-1';
-      const color = usedColors.has(action.profile.color)
-        ? PLAYER_COLORS.find((c) => !usedColors.has(c)) ?? action.profile.color
-        : action.profile.color;
+      // Nobody in a room shares a name or a colour: newcomers get the next free one
+      const name = uniqueName(next, action.profile.name || 'Guest');
+      const color = colorTaken(next, action.profile.color) ? freeColor(next) : action.profile.color;
 
-      next.players[action.profile.id] = makePlayer(
-        { ...action.profile, name: action.profile.name.trim().slice(0, 18) || 'Guest', color, teamId },
-        next.settings.startingCash
-      );
+      next.players[action.profile.id] = makePlayer({ ...action.profile, name, color, teamId }, next.settings.startingCash);
       next.playerOrder.push(action.profile.id);
-      addLog(next, { type: 'SYSTEM', message: `${action.profile.name} joined the room.` });
+      addLog(next, { type: 'SYSTEM', message: `${name} joined the room.` });
       return next;
     }
 
     case 'UPDATE_PLAYER': {
       const p = next.players[action.profile.id];
       if (!p) return state;
-      p.name = action.profile.name.trim().slice(0, 18) || p.name;
+      // Names and colours identify players on the board and in the log, so they are never shared
+      const wanted = action.profile.name.trim().replace(/\s+/g, ' ').slice(0, 18);
+      if (wanted && !nameTaken(next, wanted, p.id)) p.name = wanted;
       p.tokenId = action.profile.tokenId;
-      // Colours identify owners on the board, so two players can never share one
-      const taken = Object.values(next.players).some((o) => o.id !== p.id && o.color === action.profile.color);
-      if (!taken) p.color = action.profile.color;
+      if (!colorTaken(next, action.profile.color, p.id)) p.color = action.profile.color;
       return next;
     }
 
     case 'SET_PLAYER_CONNECTED': {
       const p = next.players[action.playerId];
       if (!p) return state;
+      if (p.connected === action.connected) return state;
       p.connected = action.connected;
+      if (action.connected) delete p.disconnectedAt;
+      else p.disconnectedAt = Date.now();
+      return next;
+    }
+
+    case 'SKIP_RECONNECT_WAIT': {
+      const p = next.players[action.playerId];
+      if (!p || p.connected || p.isBot) return state;
+      p.disconnectedAt = 0;
+      addLog(next, { type: 'SYSTEM', playerId: p.id, message: `Autopilot is playing for ${p.name} until they reconnect.` });
       return next;
     }
 

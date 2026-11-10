@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameState, PlayerId } from '../../types/game';
 import { formatINR, formatTeamName, getTeamColor } from '../../lib/format';
 import { calculateNetWorth } from '../../engine/rent';
-import { getCurrentPlayerId } from '../../engine/rules';
+import { getCurrentPlayerId, reconnectWaitMs } from '../../engine/rules';
 import { PlayerToken } from '../board/PlayerToken';
 
 interface Props {
@@ -130,7 +130,17 @@ export const PlayerList: React.FC<Props> = ({ state, localPlayerId, hoveredPlaye
                       🎟 {p.jailCardsCount}
                     </span>
                   )}
-                  {!p.connected && <span className="chip bg-ink-700 text-slate-400">Offline</span>}
+                  {!p.connected && !p.isBot && !p.bankrupt && (
+                    (reconnectWaitMs(p, Date.now()) ?? 0) > 0 ? (
+                      <span className="chip bg-amber-500/15 text-amber-200" title="Their seat is kept while they reconnect">
+                        📶 Reconnecting…
+                      </span>
+                    ) : (
+                      <span className="chip bg-ink-700 text-slate-300" title="Offline. The computer is playing their turns until they're back">
+                        🤖 Autopilot
+                      </span>
+                    )
+                  )}
                   {p.bankrupt ? (
                     <span className="chip bg-rose-500/15 text-rose-300">Bankrupt</span>
                   ) : (

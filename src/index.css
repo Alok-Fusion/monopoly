@@ -120,6 +120,91 @@
   height: clamp(11px, 3cqw, 24px);
   font-size: clamp(7px, 1.75cqw, 14px);
 }
+
+/* Tokens on the board (BoardTokens): one layer above the tiles */
+.board-token-slot {
+  transform: translate(-50%, -50%);
+  transition:
+    left 130ms linear,
+    top 130ms linear,
+    opacity 200ms ease;
+}
+.board-token2 {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(15px, 3.6cqw, 30px);
+  height: clamp(15px, 3.6cqw, 30px);
+  border-radius: 9999px;
+  border: clamp(1.5px, 0.32cqw, 2.5px) solid #fff;
+  font-size: clamp(9px, 2.05cqw, 17px);
+  line-height: 1;
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 46%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0) 50%, rgba(0, 0, 0, 0.25)),
+    var(--token);
+  /* Dark outline + drop shadow so a token reads clearly on any tile photo */
+  box-shadow:
+    0 0 0 1px rgba(10, 13, 19, 0.9),
+    0 3px 7px rgba(0, 0, 0, 0.6);
+  transition: scale 160ms ease;
+}
+.board-token2-face {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+}
+/* Whose turn it is: a bit bigger, with an amber ring pulsing out */
+.board-token2-current {
+  scale: 1.18;
+  box-shadow:
+    0 0 0 1px rgba(10, 13, 19, 0.9),
+    0 0 0 clamp(2px, 0.45cqw, 3.5px) #fbbf24,
+    0 3px 10px rgba(0, 0, 0, 0.6);
+}
+.board-token2-current::before {
+  content: '';
+  position: absolute;
+  inset: -35%;
+  border-radius: 9999px;
+  border: 2px solid #fbbf24;
+  animation: tokenPulse 1.4s ease-out infinite;
+  pointer-events: none;
+}
+.board-token2-hovered {
+  scale: 1.35;
+}
+@keyframes tokenPulse {
+  from {
+    transform: scale(0.65);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(1.2);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-token-slot {
+    transition: none;
+  }
+  .board-token2-current::before {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+.center-log {
+  font-size: clamp(9.5px, 1.7cqw, 12.5px);
+}
+.center-log-title {
+  font-size: clamp(8px, 1.2cqw, 10px);
+}
+/* Small boards (phones): the bottom action bar already shows whose turn it is,
+   so the centre drops its title and turn label to give the activity feed room */
+@container (max-width: 520px) {
+  .center-roomy-only {
+    display: none !important;
+  }
+}
 .center-text-xs {
   font-size: clamp(8px, 1.5cqw, 12px);
 }

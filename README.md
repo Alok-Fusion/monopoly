@@ -12,8 +12,8 @@ An Indian-themed property-trading board game that runs entirely in the browser. 
 - **Landmark photos** — every property, station and utility tile shows a real photo of the place (free-to-use photos from Unsplash).
 - **Open trade board** — trade cash, properties and Get Out of Jail Free cards. Offers go on a public board that every player can see, and they never interrupt play: the receiver can accept, decline or send a **counter-offer** whenever they like, even several turns later. Several deals can be open at once (one per pair of players, up to 3 offers each). If a property in an open offer changes hands, that offer is cancelled automatically. Bots haggle too — lowball them and they'll name their price.
 - **Teams of two** — partners pay no rent to each other, share colour sets and inherit each other's assets.
-- **Bots** — easy, normal and tough. Bots also take over for players who disconnect mid-game.
-- **Online rooms** — PeerJS/WebRTC. The host's browser runs the game and validates every action from guests.
+- **Bots** — easy, normal and tough. If a player drops out mid-game, the game waits 60 seconds for them to come back before autopilot plays their turns (the host can tap **Play for them** to skip the wait).
+- **Online rooms** — PeerJS/WebRTC. The host's browser runs the game and validates every action from guests. Every player in a room has their own name and colour.
 - **Game length** — Quick (20 rounds), Standard (30), Long (45) or Endless. With a limit, the richest player (cash + property value) wins when time runs out, so games always finish.
 - **Festivals** — every third round a festival bends one rule for that round: Diwali Dhamaka (half-price houses), Monsoon Season (double utility rent), IPL Fever (double railway rent), Shaadi Season (double rent on one colour set), Startup Boom (double salary), Income Tax Raid (double tax), Bharat Bandh (no rent anywhere) and the Great Indian Sale (25% off unowned property). The board announces how many rounds until the next one.
 - **Bots that make deals** — when a bot is one property away from a full set, it offers to buy the missing piece (tough bots pay more and drive a harder bargain when selling).
@@ -57,7 +57,12 @@ npm run preview
   VITE_TURN_CREDENTIAL=...
   ```
 
-If a guest loses connection they get a **Reconnect** button, and refreshing the invite link puts them back into the game as the same player.
+**Staying connected**
+
+- Guests reconnect on their own after a Wi-Fi blip or when they come back to a phone that was locked — a yellow bar shows while it happens. If it can't get back within a few minutes, a **Try again** button appears.
+- A player can always get their seat back: refresh the page, open the invite link in a new tab, or — on another device — join with the same name they were playing as.
+- The host sees **📶 Reconnecting…** next to anyone who dropped out, and the game waits 60 seconds on their turn before autopilot (**🤖 Autopilot**) takes over. The host can skip the wait with **Play for them**.
+- The join box accepts either the room code or a whole pasted invite link.
 
 ## Project layout
 

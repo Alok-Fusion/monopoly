@@ -1,6 +1,7 @@
 import React from 'react';
 import { GameState, PlayerId } from '../../types/game';
 import { Dice } from './Dice';
+import { ActivityFeed } from './ActivityFeed';
 import { PlayerToken } from './PlayerToken';
 import { getCurrentPlayerId } from '../../engine/rules';
 import { festivalText, roundsUntilNextFestival } from '../../engine/festivals';
@@ -24,6 +25,10 @@ interface Props {
   msLeft: number | null;
   /** Name of who the timer is running for, when it isn't the current player (e.g. a trade reply). */
   timerFor?: string;
+  /** The current player dropped out: how long until autopilot plays for them. */
+  reconnectWait?: { name: string; secondsLeft: number };
+  /** Host only: stop waiting and let autopilot play now. */
+  onSkipReconnectWait?: () => void;
   onRoll: () => void;
   onEndTurn: () => void;
   onOpenTrade: () => void;
@@ -60,6 +65,8 @@ export const CenterBoard: React.FC<Props> = ({
   floatingEmotes,
   msLeft,
   timerFor,
+  reconnectWait,
+  onSkipReconnectWait,
   onRoll,
   onEndTurn,
   onOpenTrade,
@@ -83,7 +90,7 @@ export const CenterBoard: React.FC<Props> = ({
   const secondsLeft = msLeft === null ? null : Math.max(0, Math.ceil(msLeft / 1000));
 
   return (
-    <div className="felt-bg relative flex h-full w-full flex-col items-center justify-between overflow-hidden p-[4%] text-center">
+    <div className="felt-bg relative flex h-full w-full flex-col items-center gap-[clamp(4px,1.3cqw,12px)] overflow-hidden p-[4%] text-center">
       {/* Floating reactions */}
       {floatingEmotes.map((e) => (
         <span
@@ -96,8 +103,8 @@ export const CenterBoard: React.FC<Props> = ({
       ))}
 
       {/* Title, round and festival */}
-      <div className="flex w-full flex-col items-center gap-[clamp(3px,0.8cqw,8px)]">
-        <div className="center-title font-display font-extrabold leading-none tracking-tight text-amber-300">Bazaar</div>
+      <div className="flex w-full shrink-0 flex-col items-center gap-[clamp(3px,0.8cqw,8px)]">
+        <div className="center-title center-roomy-only font-display font-extrabold leading-none tracking-tight text-amber-300">Bazaar</div>
         <div className="center-text-xs flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 font-semibold uppercase tracking-widest text-emerald-100/70">
           <span>
             Round {state.round}
@@ -121,7 +128,7 @@ export const CenterBoard: React.FC<Props> = ({
           </div>
         ) : (
           nextFestivalIn !== null && (
-            <span className="center-text-xs text-emerald-100/45">
+            <span className="center-text-xs center-roomy-only text-emerald-100/45">
               Next festival in {nextFestivalIn} round{nextFestivalIn === 1 ? '' : 's'}
             </span>
           )
@@ -129,9 +136,9 @@ export const CenterBoard: React.FC<Props> = ({
       </div>
 
       {/* Turn + dice + main action */}
-      <div className="flex flex-col items-center gap-[clamp(6px,1.6cqw,14px)]">
+      <div className="flex shrink-0 flex-col items-center gap-[clamp(5px,1.4cqw,12px)]">
         {current && (
-          <div className="flex items-center gap-2 rounded-full bg-black/25 py-1 pl-1 pr-3 ring-1 ring-white/10">
+          <div className="center-roomy-only flex items-center gap-2 rounded-full bg-black/25 py-1 pl-1 pr-3 ring-1 ring-white/10">
             <PlayerToken tokenId={current.tokenId} color={current.color} name={current.name} size="xs" />
             <span className="center-text-sm font-semibold text-white">
               {isMyTurn ? 'Your turn' : `${current.name}'s turn`}
@@ -152,9 +159,25 @@ export const CenterBoard: React.FC<Props> = ({
 
         <Dice dice={state.dice} isRolling={isRolling} rollKey={state.rollCount ?? 0} canRoll={canRoll} onRoll={onRoll} />
 
-        <div className="center-text-xs min-h-[1.2em] font-medium text-emerald-100/80">
-          {current ? phaseHint(state, isMyTurn, current.name) : ''}
-        </div>
+        {reconnectWait ? (
+          <div
+            className="center-text-xs flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-full bg-amber-400/15 px-3 py-1 font-semibold text-amber-100 ring-1 ring-amber-300/40"
+            role="status"
+          >
+            <span>
+              📶 Waiting for {reconnectWait.name} to reconnect · <span className="tabular-nums">{reconnectWait.secondsLeft}s</span>
+            </span>
+            {onSkipReconnectWait && (
+              <button type="button" onClick={onSkipReconnectWait} className="rounded-full bg-white/15 px-2 py-0.5 font-bold text-white hover:bg-white/25">
+                Play for them
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="center-text-xs min-h-[1.2em] font-medium text-emerald-100/80">
+            {current ? phaseHint(state, isMyTurn, current.name) : ''}
+          </div>
+        )}
 
         <div className="flex h-[clamp(36px,7.5cqw,52px)] items-center">
           {canRoll && (
@@ -173,8 +196,11 @@ export const CenterBoard: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Secondary actions + recent activity */}
-      <div className="flex w-full flex-col items-center gap-[clamp(4px,1.2cqw,10px)]">
+      {/* What just happened, right under the dice */}
+      <ActivityFeed state={state} className="w-full max-w-[94%] flex-1" />
+
+      {/* Secondary actions */}
+      <div className="flex w-full shrink-0 flex-col items-center gap-[clamp(4px,1.2cqw,10px)] empty:hidden">
         {amPlaying && (
           <div className="hidden items-center gap-2 lg:flex">
             <button
@@ -193,17 +219,6 @@ export const CenterBoard: React.FC<Props> = ({
             </button>
           </div>
         )}
-
-        <ul className="w-full max-w-[90%] space-y-[2px]" aria-live="polite">
-          {state.logs.slice(0, 3).map((log, i) => (
-            <li
-              key={log.id}
-              className={`center-text-xs truncate ${i === 0 ? 'font-medium text-white' : 'text-emerald-100/55'}`}
-            >
-              {log.message}
-            </li>
-          ))}
-        </ul>
 
         {amPlaying && (
           <div className="hidden items-center gap-[2px] rounded-full bg-black/25 px-2 py-0.5 ring-1 ring-white/10 lg:flex">

@@ -1,10 +1,11 @@
 import React from 'react';
-import { GameState, PlayerId, PlayerState } from '../../types/game';
+import { GameState, PlayerId } from '../../types/game';
 import { getTile } from '../../engine/board';
 import { getCurrentPlayerId } from '../../engine/rules';
 import { Tile, TileOrientation } from './Tile';
 import { CornerTile } from './CornerTile';
 import { CenterBoard, FloatingEmote } from './CenterBoard';
+import { BoardTokens } from './BoardTokens';
 import { getTeamColor } from '../../lib/format';
 
 interface Props {
@@ -17,6 +18,8 @@ interface Props {
   floatingEmotes: FloatingEmote[];
   msLeft: number | null;
   timerFor?: string;
+  reconnectWait?: { name: string; secondsLeft: number };
+  onSkipReconnectWait?: () => void;
   onTileClick: (index: number) => void;
   onRoll: () => void;
   onEndTurn: () => void;
@@ -54,6 +57,8 @@ export const Board: React.FC<Props> = ({
   floatingEmotes,
   msLeft,
   timerFor,
+  reconnectWait,
+  onSkipReconnectWait,
   onTileClick,
   onRoll,
   onEndTurn,
@@ -62,14 +67,6 @@ export const Board: React.FC<Props> = ({
   onSendEmote,
 }) => {
   const teamMode = state.settings.mode === 'TEAMS';
-
-  const playersByPosition: Record<number, PlayerState[]> = {};
-  state.playerOrder.forEach((id) => {
-    const p = state.players[id];
-    if (!p || p.bankrupt) return;
-    const pos = displayPositions[id] ?? p.position;
-    (playersByPosition[pos] ??= []).push(p);
-  });
 
   const hovered = hoveredPlayerId ? state.players[hoveredPlayerId] : null;
   const ownerColorOf = (index: number): string | undefined => {
@@ -91,6 +88,7 @@ export const Board: React.FC<Props> = ({
 
   return (
     <div className="board board-frame relative mx-auto aspect-square w-full rounded-[22px] p-[0.9%]" style={{ maxWidth: 'min(100%, var(--board-max, 100%))' }}>
+      <div className="relative h-full w-full">
       <div
         className="grid h-full w-full gap-px overflow-hidden rounded-[15px] bg-paper-400/90"
         style={{
@@ -102,7 +100,6 @@ export const Board: React.FC<Props> = ({
           <div key={idx} className="min-h-0 min-w-0" style={{ gridColumn: col, gridRow: row }}>
             <CornerTile
               definition={getTile(idx)}
-              playersOnTile={playersByPosition[idx] ?? []}
               isCurrentPosition={currentPos === idx}
               vacationPool={state.vacationPool}
               vacationEnabled={state.settings.vacationCash}
@@ -117,7 +114,6 @@ export const Board: React.FC<Props> = ({
             <Tile
               definition={getTile(idx)}
               state={state.tiles[idx]!}
-              playersOnTile={playersByPosition[idx] ?? []}
               isHighlighted={isHighlighted(idx)}
               highlightColor={hovered ? (teamMode && hovered.teamId ? getTeamColor(hovered.teamId) : hovered.color) : undefined}
               ownerColor={ownerColorOf(idx)}
@@ -137,6 +133,8 @@ export const Board: React.FC<Props> = ({
             floatingEmotes={floatingEmotes}
             msLeft={msLeft}
             timerFor={timerFor}
+            reconnectWait={reconnectWait}
+            onSkipReconnectWait={onSkipReconnectWait}
             onRoll={onRoll}
             onEndTurn={onEndTurn}
             onOpenTrade={onOpenTrade}
@@ -144,6 +142,15 @@ export const Board: React.FC<Props> = ({
             onSendEmote={onSendEmote}
           />
         </div>
+      </div>
+      <BoardTokens
+        state={state}
+        displayPositions={displayPositions}
+        currentPlayerId={current?.id}
+        localPlayerId={localPlayerId}
+        hoveredPlayerId={hoveredPlayerId}
+        onTileClick={onTileClick}
+      />
       </div>
     </div>
   );

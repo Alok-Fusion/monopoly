@@ -91,6 +91,8 @@ export interface PlayerState {
   isBot: boolean;
   botDifficulty?: BotDifficulty;
   connected: boolean;
+  /** When this (human) player lost their connection; autopilot waits a grace period before playing for them. */
+  disconnectedAt?: number;
   /** Round in which this player last proposed a trade (used to stop bots spamming offers). */
   lastTradeRound?: number;
   /** Stopped at Chai Break: sits out their next turn. */
@@ -281,6 +283,8 @@ export type GameAction =
   | { type: 'ADD_PLAYER'; profile: PlayerProfile }
   | { type: 'UPDATE_PLAYER'; profile: PlayerProfile }
   | { type: 'SET_PLAYER_CONNECTED'; playerId: PlayerId; connected: boolean }
+  /** Host only: stop waiting for a disconnected player and let autopilot take their turns now. */
+  | { type: 'SKIP_RECONNECT_WAIT'; playerId: PlayerId }
   | { type: 'REMOVE_PLAYER'; playerId: PlayerId }
   | { type: 'UPDATE_SETTINGS'; settings: Partial<GameSettings> }
   | { type: 'SET_PLAYER_TEAM'; playerId: PlayerId; teamId?: TeamId }

@@ -4,10 +4,22 @@ import { ChatMessage, GameAction, GameState, PlayerId, PlayerProfile, TokenId, T
 import { createInitialState, gameReducer } from './engine/state';
 import { getTile, BOARD_SIZE } from './engine/board';
 import { getBotNextAction } from './engine/bots';
-import { actorOfAction, canMortgage, decisionOwner, decisionTimeLimitMs, findTrade, getCurrentPlayerId, openTrades, ownedTiles } from './engine/rules';
+import {
+  actorOfAction,
+  canMortgage,
+  decisionOwner,
+  decisionTimeLimitMs,
+  findTrade,
+  getCurrentPlayerId,
+  isAutomated,
+  openTrades,
+  ownedTiles,
+  reconnectWaitMs,
+} from './engine/rules';
 import { calculateRent } from './engine/rent';
 import { priceOf } from './engine/festivals';
-import { net } from './net/peer';
+import { net, NetStatus, normalizeRoomCode } from './net/peer';
+import { chooseSeat, lastSeatIn, rememberSeat } from './net/seats';
 import { sounds } from './lib/sound';
 import { formatINR } from './lib/format';
 import { Board } from './components/board/Board';
@@ -22,7 +34,6 @@ import { Lobby, NetRole } from './components/lobby/Lobby';
 import { RoomCard } from './components/sidebar/LeftSidebar';
 import { RightSidebar } from './components/sidebar/RightSidebar';
 import { ChatPanel } from './components/sidebar/ChatPanel';
-import { GameLog } from './components/sidebar/GameLog';
 import { BuyPropertyModal } from './components/modals/BuyPropertyModal';
 import { AuctionModal } from './components/modals/AuctionModal';
 import { CardModal } from './components/modals/CardModal';
@@ -105,6 +116,18 @@ function clearSavedGame() {
   }
 }
 
+/** Keeps ?room=CODE in the address bar in step with the room a guest is in. */
+function setRoomInUrl(code: string | null) {
+  try {
+    const url = new URL(window.location.href);
+    if (code) url.searchParams.set('room', code);
+    else url.searchParams.delete('room');
+    window.history.replaceState(null, '', url.toString());
+  } catch {
+    /* ignore */
+  }
+}
+
 function makeRoomCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
@@ -168,15 +191,22 @@ export const App: React.FC = () => {
   const [state, dispatchLocal] = useReducer(gameReducer, profile, createInitialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const localIdRef = useRef(localPlayerId);
+  localIdRef.current = localPlayerId;
 
   // Networking
   const [role, setRole] = useState<NetRole>('offline');
   const roleRef = useRef(role);
   roleRef.current = role;
   const [roomCode, setRoomCode] = useState('');
-  const [connected, setConnected] = useState(false);
-  const [connecting, setConnecting] = useState(false);
+  const [netStatus, setNetStatus] = useState<NetStatus>('idle');
+  /** Room we're trying to get into (kept after a failure so "Try again" knows where). */
+  const [joiningCode, setJoiningCode] = useState<string | null>(null);
   const [netError, setNetError] = useState<string | null>(null);
+  const connected = netStatus === 'connected';
+  const connecting = netStatus === 'connecting';
 
   // UI
   const [hoveredPlayerId, setHoveredPlayerId] = useState<PlayerId | null>(null);
@@ -187,8 +217,7 @@ export const App: React.FC = () => {
   const [isPropertyManagerOpen, setIsPropertyManagerOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [confirmForfeit, setConfirmForfeit] = useState(false);
-  const [mobileTab, setMobileTab] = useState<'players' | 'chat' | 'log'>('players');
-  const [sideTab, setSideTab] = useState<'chat' | 'log'>('chat');
+  const [mobileTab, setMobileTab] = useState<'players' | 'chat'>('players');
   const [emoteOpen, setEmoteOpen] = useState(false);
   /** The incoming deal the local player is currently writing a counter-offer to. */
   const [counterDraft, setCounterDraft] = useState<TradeOffer | null>(null);
@@ -219,11 +248,13 @@ export const App: React.FC = () => {
     net.cleanup();
     setRole('offline');
     setRoomCode('');
-    setConnected(false);
-    setConnecting(false);
-    dispatchLocal({ type: 'SYNC_STATE', state: createInitialState(profile) });
-  }, [profile]);
+    setNetStatus('idle');
+    setJoiningCode(null);
+    dispatchLocal({ type: 'SYNC_STATE', state: createInitialState({ ...profileRef.current, id: localIdRef.current }) });
+  }, []);
 
+  // The handlers live on a long-lived singleton, so re-running this effect (StrictMode,
+  // hot reload) never tears down a connection that is in use.
   useEffect(() => {
     net.onStateSync = (synced) => dispatchLocal({ type: 'SYNC_STATE', state: synced });
 
@@ -233,16 +264,18 @@ export const App: React.FC = () => {
       if (actorOfAction(stateRef.current, action) === senderId) dispatchLocal(action);
     };
 
-    net.onPlayerJoined = (guest, reply) => {
+    net.onPlayerJoined = (req) => {
       const s = stateRef.current;
-      if (s.players[guest.id]) {
-        dispatchLocal({ type: 'SET_PLAYER_CONNECTED', playerId: guest.id, connected: true });
-        reply(s);
-        return;
+      const seat = chooseSeat(s, req.player, req.seatHint, req.livePlayerIds, localIdRef.current);
+      if (seat.kind === 'reject') return req.reject(seat.reason);
+      req.accept(seat.playerId);
+      if (seat.kind === 'existing') {
+        // Back in their seat: send the game straight away, then mark them online
+        req.reply(s);
+        dispatchLocal({ type: 'SET_PLAYER_CONNECTED', playerId: seat.playerId, connected: true });
+      } else {
+        dispatchLocal({ type: 'ADD_PLAYER', profile: req.player });
       }
-      if (s.phase !== 'LOBBY') return net.rejectGuest(guest.id, 'That game has already started.');
-      if (s.playerOrder.length >= Math.min(s.settings.maxPlayers, 8)) return net.rejectGuest(guest.id, 'That room is full.');
-      dispatchLocal({ type: 'ADD_PLAYER', profile: guest });
     };
 
     net.onPlayerLeft = (playerId) => {
@@ -250,89 +283,116 @@ export const App: React.FC = () => {
       else dispatchLocal({ type: 'SET_PLAYER_CONNECTED', playerId, connected: false });
     };
 
+    net.onSeatAssigned = (playerId) => {
+      // The host put us back in the seat this device (or this name) had before
+      setLocalPlayerId(playerId);
+      safeSet('session', 'dt_player_id', playerId);
+      setProfile((p) => ({ ...p, id: playerId }));
+    };
+
     net.onJoinRejected = (reason) => {
+      setRoomInUrl(null);
       setNetError(reason);
-      setTimeout(() => {
-        net.cleanup();
-        setRole('offline');
-        setRoomCode('');
-        setConnected(false);
-      }, 0);
+      setRole('offline');
+      setRoomCode('');
+      setJoiningCode(null);
+      dispatchLocal({ type: 'SYNC_STATE', state: createInitialState({ ...profileRef.current, id: localIdRef.current }) });
     };
 
-    net.onConnectionStatusChange = (status, errorMsg) => {
-      setConnected(status === 'connected');
-      if (errorMsg) setNetError(errorMsg);
+    net.onStatus = (status, message) => {
+      setNetStatus(status);
+      if (message) setNetError(message);
+      else if (status === 'connected') setNetError(null);
     };
+  }, []);
 
-    return () => net.cleanup();
+  // Phones freeze background tabs and drop Wi-Fi: check the link as soon as we're back
+  useEffect(() => {
+    const wake = () => document.visibilityState === 'visible' && net.reconnectNow();
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('pageshow', wake);
+    return () => {
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('pageshow', wake);
+    };
   }, []);
 
   const createRoom = () => {
     const code = makeRoomCode();
     setNetError(null);
-    setConnecting(true);
+    setJoiningCode(null);
     net.createRoom(
       code,
       (ready) => {
         setRole('host');
         setRoomCode(ready);
-        setConnecting(false);
         dispatchLocal({ type: 'SET_ROOM', roomCode: ready, isHost: true });
       },
-      (err) => {
-        setNetError(err);
-        setConnecting(false);
-      }
+      (err) => setNetError(err)
     );
   };
 
-  const joinRoom = useCallback(
-    (code: string) => {
-      setNetError(null);
-      setConnecting(true);
-      net.joinRoom(
-        code.toUpperCase(),
-        profile,
-        () => {
-          setRole('guest');
-          setRoomCode(code.toUpperCase());
-          setConnecting(false);
-        },
-        (err) => {
-          setNetError(err);
-          setConnecting(false);
-        }
-      );
-    },
-    [profile]
-  );
-
-  // Auto-join from an invite link (?room=CODE)
-  useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get('room');
-    if (code) joinRoom(code);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const joinRoom = useCallback((input: string) => {
+    const code = normalizeRoomCode(input);
+    if (!code) return;
+    setNetError(null);
+    setJoiningCode(code);
+    const me = { ...profileRef.current, id: localIdRef.current };
+    const hint = lastSeatIn(code);
+    net.joinRoom(code, me, {
+      seatHint: hint && hint !== me.id ? hint : undefined,
+      onJoined: () => {
+        setRole('guest');
+        setRoomCode(code);
+        setJoiningCode(null);
+        // So a refresh (or the browser restoring the tab) rejoins this room
+        setRoomInUrl(code);
+      },
+      onError: (err) => setNetError(err),
+    });
   }, []);
 
+  // Auto-join from an invite link (?room=CODE) — once, even under StrictMode
+  const autoJoined = useRef(false);
+  useEffect(() => {
+    if (autoJoined.current) return;
+    autoJoined.current = true;
+    const code = new URLSearchParams(window.location.search).get('room');
+    if (code) joinRoom(code);
+  }, [joinRoom]);
+
+  // Remember our seat so a new tab on this device can sit back down in it
+  const seated = role === 'guest' && connected && !!state.players[localPlayerId];
+  useEffect(() => {
+    if (seated && roomCode) rememberSeat(roomCode, localPlayerId);
+  }, [seated, roomCode, localPlayerId]);
+
   const leaveRoom = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete('room');
-    window.history.replaceState(null, '', url.toString());
+    setRoomInUrl(null);
     setNetError(null);
     resetToOffline();
   };
 
   /* ------------------------------- profile ------------------------------ */
 
-  // If the host had to give us a different colour (ours was taken), adopt it locally
+  // If the host had to give us a different colour or name (ours was taken), show that one
   const myServerColor = state.players[localPlayerId]?.color;
   useEffect(() => {
     if (myServerColor && myServerColor !== profile.color) setProfile((p) => ({ ...p, color: myServerColor }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myServerColor]);
+  const lastNameEdit = useRef(0);
+  const myServerName = state.players[localPlayerId]?.name;
+  useEffect(() => {
+    // While typing, the host's echo lags a keystroke behind; don't fight the input
+    if (!myServerName || Date.now() - lastNameEdit.current < 2000) return;
+    setProfile((p) => (p.name === myServerName ? p : { ...p, name: myServerName }));
+  }, [myServerName]);
 
   const updateProfile = (next: PlayerProfile) => {
+    if (next.name !== profile.name) lastNameEdit.current = Date.now();
     setProfile(next);
     safeSet('local', 'richup_player_name', next.name);
     safeSet('local', 'richup_token_id', next.tokenId);
@@ -365,12 +425,12 @@ export const App: React.FC = () => {
     return () => clearInterval(id);
   }, [auctionActive, role]);
 
+  /** Bumped when a disconnected player's grace period runs out, so autopilot looks again. */
+  const [graceTick, setGraceTick] = useState(0);
   useEffect(() => {
     if (role === 'guest' || state.phase !== 'PLAYING' || animating || isRolling) return;
-    const automated = (id: PlayerId | undefined) => {
-      const p = id ? state.players[id] : undefined;
-      return !!p && !p.bankrupt && (p.isBot || !p.connected);
-    };
+    const now = Date.now();
+    const automated = (id: PlayerId | undefined) => isAutomated(id ? state.players[id] : undefined, now);
 
     let actorId: PlayerId | undefined;
     let delay = 900;
@@ -386,7 +446,15 @@ export const App: React.FC = () => {
       const currentId = getCurrentPlayerId(state);
       if (automated(currentId)) actorId = currentId;
     }
-    if (!actorId) return;
+    if (!actorId) {
+      // Waiting on someone who dropped out? Look again when their grace period ends.
+      const waits = [getCurrentPlayerId(state), ...openTrades(state).map((t) => t.targetId), ...(state.activeAuction?.activeBidderIds ?? [])]
+        .map((id) => reconnectWaitMs(id ? state.players[id] : undefined, now))
+        .filter((ms): ms is number => ms !== null && ms > 0);
+      if (!waits.length) return;
+      const t = setTimeout(() => setGraceTick((n) => n + 1), Math.min(...waits) + 50);
+      return () => clearTimeout(t);
+    }
 
     const id = actorId;
     const t = setTimeout(() => {
@@ -396,17 +464,24 @@ export const App: React.FC = () => {
       else dispatchLocal(action);
     }, delay);
     return () => clearTimeout(t);
-  }, [state, role, animating, isRolling, runRoll]);
+  }, [state, role, animating, isRolling, runRoll, graceTick]);
 
   /* ----------------------------- turn timer ----------------------------- */
 
   const timerOn = state.settings.turnTimeoutSeconds > 0 && state.phase === 'PLAYING';
+  const someoneOffline =
+    state.phase === 'PLAYING' &&
+    state.playerOrder.some((id) => {
+      const p = state.players[id];
+      return !!p && !p.isBot && !p.connected && !p.bankrupt;
+    });
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!timerOn) return;
+    if (!timerOn && !someoneOffline) return;
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(id);
-  }, [timerOn]);
+  }, [timerOn, someoneOffline]);
 
   const decision = decisionOwner(state);
   const decisionPlayer = decision ? state.players[decision.playerId] : undefined;
@@ -547,6 +622,8 @@ export const App: React.FC = () => {
   const counterBase = counterDraft ? findTrade(state, counterDraft.id) : undefined;
   const connectedHumans = state.playerOrder.filter((id) => !state.players[id]?.isBot && state.players[id]?.connected).length;
   const canEditRules = role !== 'guest' && state.phase === 'LOBBY';
+  const currentWaitMs = state.phase === 'PLAYING' ? reconnectWaitMs(current, Math.max(now, Date.now())) : null;
+  const reconnectWait = current && currentWaitMs ? { name: current.name, secondsLeft: Math.ceil(currentWaitMs / 1000) } : undefined;
 
   const toggleSound = () => setSoundOn(sounds.toggleSound());
   const sendEmote = (emoji: string) => {
@@ -637,11 +714,20 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-bg min-h-[100dvh] text-slate-100">
-      {role === 'guest' && !connected && !connecting && (
-        <div className="fixed inset-x-0 top-0 z-[60] flex items-center justify-center gap-3 bg-rose-600 px-4 py-2 text-sm font-medium text-white">
+      {role === 'guest' && netStatus === 'reconnecting' && (
+        <div
+          className="fixed inset-x-0 top-0 z-[60] flex items-center justify-center gap-3 bg-amber-500 px-4 py-2 text-sm font-semibold text-ink-950"
+          role="status"
+        >
+          <WifiOff size={16} /> Connection dropped. Getting you back in…
+          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink-950/30 border-t-ink-950" aria-hidden="true" />
+        </div>
+      )}
+      {role === 'guest' && netStatus === 'disconnected' && (
+        <div className="fixed inset-x-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-3 bg-rose-600 px-4 py-2 text-sm font-medium text-white">
           <WifiOff size={16} /> Lost connection to the host.
-          <button type="button" className="btn btn-sm bg-white text-rose-700 hover:bg-rose-50" onClick={() => joinRoom(roomCode)}>
-            Reconnect
+          <button type="button" className="btn btn-sm bg-white text-rose-700 hover:bg-rose-50" onClick={() => net.reconnectNow()}>
+            Try again
           </button>
           <button type="button" className="btn btn-sm bg-white/20 text-white hover:bg-white/30" onClick={leaveRoom}>
             Leave
@@ -658,6 +744,7 @@ export const App: React.FC = () => {
           roomCode={roomCode}
           connected={connected}
           connecting={connecting}
+          joiningCode={joiningCode}
           netError={netError}
           onUpdateProfile={updateProfile}
           onAddBot={(difficulty) => dispatch({ type: 'ADD_BOT', difficulty })}
@@ -710,6 +797,8 @@ export const App: React.FC = () => {
                 floatingEmotes={floatingEmotes}
                 msLeft={msLeft}
                 timerFor={decision && decision.playerId !== currentId ? decisionPlayer?.name : undefined}
+                reconnectWait={reconnectWait}
+                onSkipReconnectWait={role === 'host' && currentId ? () => dispatchLocal({ type: 'SKIP_RECONNECT_WAIT', playerId: currentId }) : undefined}
                 onTileClick={inspectTile}
                 onRoll={runRoll}
                 onEndTurn={() => dispatch({ type: 'END_TURN' })}
@@ -723,16 +812,13 @@ export const App: React.FC = () => {
           {/* Laptop and desktop: right column */}
           <aside className="hidden w-[330px] shrink-0 flex-col gap-3 overflow-y-auto pr-0.5 lg:flex 2xl:w-[350px]">
             <RightSidebar {...sidebarProps} />
-            <div className="flex min-h-[300px] flex-1 flex-col gap-2 xl:hidden">
-              {tabBar([['chat', 'Chat'], ['log', 'Activity']] as const, sideTab, setSideTab)}
-              {sideTab === 'chat' ? chat('min-h-[260px] flex-1') : <GameLog state={state} className="min-h-[260px] flex-1" />}
-            </div>
-            <GameLog state={state} className="hidden min-h-[220px] flex-1 xl:flex" />
+            {/* Activity lives on the board now; laptops keep chat here */}
+            {chat('min-h-[300px] flex-1 xl:hidden')}
           </aside>
 
           {/* Phones and tablets: tabs under the board */}
           <section className="mx-auto w-full max-w-2xl space-y-2 lg:hidden">
-            {tabBar([['players', 'Players'], ['chat', 'Chat'], ['log', 'Activity']] as const, mobileTab, setMobileTab)}
+            {tabBar([['players', 'Players'], ['chat', 'Chat']] as const, mobileTab, setMobileTab)}
             {mobileTab === 'players' && (
               <div className="space-y-3">
                 <RightSidebar {...sidebarProps} />
@@ -740,7 +826,6 @@ export const App: React.FC = () => {
               </div>
             )}
             {mobileTab === 'chat' && chat('h-[380px]')}
-            {mobileTab === 'log' && <GameLog state={state} className="h-[380px]" />}
           </section>
         </div>
       )}

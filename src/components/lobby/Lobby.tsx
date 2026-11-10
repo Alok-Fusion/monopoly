@@ -8,6 +8,8 @@ import { MAX_PLAYERS_CAP } from '../../engine/state';
 import { Brand } from '../common/Brand';
 import { RulesPanel } from '../modals/GameSettingsModal';
 import { inviteLink, REACH_NOTE } from '../../lib/invite';
+import { normalizeRoomCode } from '../../net/peer';
+import { nameTaken } from '../../engine/rules';
 
 export type NetRole = 'offline' | 'host' | 'guest';
 
@@ -19,6 +21,8 @@ interface Props {
   roomCode: string;
   connected: boolean;
   connecting: boolean;
+  /** Room code we're joining (or failed to join, for "Try again"). */
+  joiningCode: string | null;
   netError: string | null;
   onUpdateProfile: (profile: PlayerProfile) => void;
   onAddBot: (difficulty: BotDifficulty) => void;
@@ -81,6 +85,7 @@ export const Lobby: React.FC<Props> = ({
   roomCode,
   connected,
   connecting,
+  joiningCode,
   netError,
   onUpdateProfile,
   onAddBot,
@@ -108,12 +113,21 @@ export const Lobby: React.FC<Props> = ({
   const note = startNote(state);
   const invite = inviteLink(roomCode);
   const inviteUrl = invite.url;
-  const takenColors = new Set(state.playerOrder.filter((id) => id !== localPlayerId).map((id) => state.players[id]?.color));
+  const takenColors = new Set(
+    state.playerOrder.filter((id) => id !== localPlayerId).map((id) => state.players[id]?.color.toLowerCase())
+  );
+  const nameClash = !!nameDraft.trim() && nameTaken(state, nameDraft, localPlayerId);
 
   const commitName = (value: string) => {
     setNameDraft(value);
     const trimmed = value.trim();
-    if (trimmed) onUpdateProfile({ ...profile, name: trimmed });
+    // Two players can never share a name, so a taken one isn't sent
+    if (trimmed && !nameTaken(state, trimmed, localPlayerId)) onUpdateProfile({ ...profile, name: trimmed });
+  };
+  const randomName = () => {
+    const free = RANDOM_NAMES.filter((n) => !nameTaken(state, n, localPlayerId));
+    const pool = free.length ? free : RANDOM_NAMES;
+    commitName(pool[Math.floor(Math.random() * pool.length)]!);
   };
 
   const copyInvite = async () => {
@@ -196,20 +210,27 @@ export const Lobby: React.FC<Props> = ({
                       maxLength={18}
                       value={nameDraft}
                       onChange={(e) => commitName(e.target.value)}
-                      onBlur={() => !nameDraft.trim() && setNameDraft(profile.name)}
-                      className="input font-semibold"
+                      onBlur={() => (!nameDraft.trim() || nameClash) && setNameDraft(profile.name)}
+                      className={`input font-semibold ${nameClash ? 'border-rose-400/70 ring-1 ring-rose-400/50' : ''}`}
                       placeholder="Your name"
+                      aria-invalid={nameClash}
+                      aria-describedby={nameClash ? 'nickname-taken' : undefined}
                     />
                     <button
                       type="button"
                       className="btn btn-secondary shrink-0 px-3"
-                      onClick={() => commitName(RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)]!)}
+                      onClick={randomName}
                       title="Random name"
                       aria-label="Random name"
                     >
                       <Dice5 size={16} />
                     </button>
                   </div>
+                  {nameClash && (
+                    <p id="nickname-taken" className="mt-1.5 text-xs font-medium text-rose-300">
+                      Someone here is already called {nameDraft.trim()}. Pick another name.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -237,7 +258,7 @@ export const Lobby: React.FC<Props> = ({
               <div className="mb-1.5 text-xs text-slate-400">Colour</div>
               <div className="flex flex-wrap gap-2">
                 {COLORS.map((c) => {
-                  const taken = takenColors.has(c);
+                  const taken = takenColors.has(c.toLowerCase());
                   const on = profile.color === c;
                   return (
                     <button
@@ -264,28 +285,37 @@ export const Lobby: React.FC<Props> = ({
                     Create a room and share the link. Friends join straight from their browser — keep this tab open while you play.
                   </p>
                   <button type="button" className="btn btn-secondary w-full" onClick={onCreateRoom} disabled={connecting}>
-                    {connecting ? 'Creating room…' : 'Create online room'}
+                    {connecting && !joiningCode ? 'Creating room…' : 'Create online room'}
                   </button>
                   <form
                     className="flex gap-2"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      if (roomInput.trim()) onJoinRoom(roomInput.trim());
+                      if (roomInput) onJoinRoom(roomInput);
                     }}
                   >
                     <input
                       type="text"
-                      placeholder="Room code"
-                      maxLength={8}
+                      inputMode="text"
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="Room code or invite link"
                       value={roomInput}
-                      onChange={(e) => setRoomInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-                      className="input font-mono uppercase tracking-widest"
-                      aria-label="Room code"
+                      onChange={(e) => setRoomInput(normalizeRoomCode(e.target.value))}
+                      className="input font-mono uppercase tracking-widest placeholder:normal-case placeholder:tracking-normal"
+                      aria-label="Room code or invite link"
                     />
-                    <button type="submit" className="btn btn-secondary shrink-0" disabled={!roomInput.trim() || connecting}>
+                    <button type="submit" className="btn btn-secondary shrink-0" disabled={!roomInput || connecting}>
                       Join
                     </button>
                   </form>
+                  {connecting && joiningCode && (
+                    <p className="flex items-center gap-2 rounded-lg bg-black/25 px-3 py-2 text-xs text-slate-300 ring-1 ring-white/5" role="status">
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-amber-300" aria-hidden="true" />
+                      Joining room <span className="font-mono font-bold tracking-widest text-amber-300">{joiningCode}</span>…
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -324,7 +354,16 @@ export const Lobby: React.FC<Props> = ({
                   )}
                 </div>
               )}
-              {netError && <p className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">{netError}</p>}
+              {netError && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200" role="alert">
+                  <span className="min-w-0 flex-1">{netError}</span>
+                  {role === 'offline' && joiningCode && !connecting && (
+                    <button type="button" className="btn btn-sm bg-white/10 text-white hover:bg-white/20" onClick={() => onJoinRoom(joiningCode)}>
+                      Try again
+                    </button>
+                  )}
+                </div>
+              )}
             </Card>
           </div>
 

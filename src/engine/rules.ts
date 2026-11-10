@@ -1,4 +1,4 @@
-import { GameAction, GameState, PlayerId, TradeOffer } from '../types/game';
+import { GameAction, GameState, PlayerId, PlayerState, TradeOffer } from '../types/game';
 import { getTile, GROUP_TILES, isColorGroup } from './board';
 import { hasMonopoly } from './rent';
 import { houseCostOf } from './festivals';
@@ -219,7 +219,6 @@ export function actorOfAction(state: GameState, action: GameAction): PlayerId | 
     case 'UNMORTGAGE_PROPERTY':
     case 'RESOLVE_DEBT':
     case 'DECLARE_BANKRUPTCY':
-    case 'SET_PLAYER_CONNECTED':
       return action.playerId;
     case 'PROPOSE_TRADE':
       return action.offer.proposerId;
@@ -236,8 +235,8 @@ export function actorOfAction(state: GameState, action: GameAction): PlayerId | 
     case 'SET_PLAYER_TEAM':
       return action.playerId;
     default:
-      // START_GAME, ADD_BOT, ADD_PLAYER, REMOVE_PLAYER, UPDATE_SETTINGS, RESET_GAME,
-      // AUCTION_TICK, LAND_ON_TILE, SET_ROOM, SYNC_STATE are host-only.
+      // START_GAME, ADD_BOT, ADD_PLAYER, REMOVE_PLAYER, UPDATE_SETTINGS, RESET_GAME, AUCTION_TICK,
+      // LAND_ON_TILE, SET_ROOM, SYNC_STATE, SET_PLAYER_CONNECTED, SKIP_RECONNECT_WAIT are host-only.
       return 'HOST';
   }
 }
@@ -274,4 +273,50 @@ export function decisionOwner(state: GameState): { playerId: PlayerId; kind: Dec
 export function decisionTimeLimitMs(state: GameState, kind: DecisionKind): number {
   const base = state.settings.turnTimeoutSeconds * 1000;
   return kind === 'DEBT' ? base * 2 : base;
+}
+
+/* ----------------------------- connections ----------------------------- */
+
+/** How long the game waits for a disconnected player to come back before autopilot plays for them. */
+export const RECONNECT_GRACE_MS = 60_000;
+
+/** Milliseconds left before autopilot takes over a disconnected player (0 = it already has; null = not waiting). */
+export function reconnectWaitMs(p: PlayerState | undefined, now: number): number | null {
+  if (!p || p.isBot || p.connected || p.bankrupt) return null;
+  return Math.max(0, (p.disconnectedAt ?? 0) + RECONNECT_GRACE_MS - now);
+}
+
+/** Bots, and humans who have been gone longer than the grace period, are played by the computer. */
+export function isAutomated(p: PlayerState | undefined, now: number): boolean {
+  if (!p || p.bankrupt) return false;
+  if (p.isBot) return true;
+  return reconnectWaitMs(p, now) === 0;
+}
+
+/* ------------------------------ identities ----------------------------- */
+
+const nameKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+const colorKey = (color: string) => color.trim().toLowerCase();
+
+/** Another player in the room already uses this name (case and spacing ignored). */
+export function nameTaken(state: GameState, name: string, exceptId?: PlayerId): boolean {
+  const key = nameKey(name);
+  return Object.values(state.players).some((p) => p.id !== exceptId && nameKey(p.name) === key);
+}
+
+/** Another player in the room already uses this colour. */
+export function colorTaken(state: GameState, color: string, exceptId?: PlayerId): boolean {
+  const key = colorKey(color);
+  return Object.values(state.players).some((p) => p.id !== exceptId && colorKey(p.color) === key);
+}
+
+/** The wanted name if it's free, otherwise "Name 2", "Name 3"… */
+export function uniqueName(state: GameState, wanted: string, exceptId?: PlayerId): string {
+  const base = wanted.trim().replace(/\s+/g, ' ').slice(0, 18) || 'Player';
+  if (!nameTaken(state, base, exceptId)) return base;
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${base.slice(0, 18 - String(n).length - 1)} ${n}`;
+    if (!nameTaken(state, candidate, exceptId)) return candidate;
+  }
+  return `${base.slice(0, 12)} ${Math.random().toString(36).slice(2, 6)}`;
 }

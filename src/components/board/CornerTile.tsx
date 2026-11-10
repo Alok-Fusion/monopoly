@@ -1,12 +1,10 @@
 import React from 'react';
-import { TileDefinition, PlayerState } from '../../types/game';
+import { TileDefinition } from '../../types/game';
 import { formatINR } from '../../lib/format';
 import { SALARY_AMOUNT } from '../../engine/board';
-import { PlayerToken } from './PlayerToken';
 
 interface Props {
   definition: TileDefinition;
-  playersOnTile: PlayerState[];
   isCurrentPosition?: boolean;
   vacationPool?: number;
   vacationEnabled?: boolean;
@@ -14,18 +12,8 @@ interface Props {
   onClick?: () => void;
 }
 
-const Tokens: React.FC<{ players: PlayerState[]; className?: string }> = ({ players, className = '' }) =>
-  players.length ? (
-    <div className={`pointer-events-none absolute z-30 flex flex-wrap content-center items-center justify-center gap-[2px] ${className}`}>
-      {players.map((p) => (
-        <PlayerToken key={p.id} tokenId={p.tokenId} color={p.color} name={p.name} size="board" className="animate-token-hop" />
-      ))}
-    </div>
-  ) : null;
-
 export const CornerTile: React.FC<Props> = ({
   definition,
-  playersOnTile,
   isCurrentPosition,
   vacationPool = 0,
   vacationEnabled = true,
@@ -37,8 +25,6 @@ export const CornerTile: React.FC<Props> = ({
 
   // Tihar Jail: a cell in the inner corner, "Just visiting" lane along the outer edges.
   if (definition.index === 10) {
-    const jailed = playersOnTile.filter((p) => p.inJail);
-    const visiting = playersOnTile.filter((p) => !p.inJail);
     return (
       <div className={`${base} bg-paper-100`} style={ring} onClick={onClick} title="Tihar Jail">
         <div className="absolute right-0 top-0 flex h-[68%] w-[68%] flex-col items-center justify-center border-b-2 border-l-2 border-ink-700 bg-orange-200/90">
@@ -49,7 +35,6 @@ export const CornerTile: React.FC<Props> = ({
           </div>
           <span className="tile-corner-title relative font-display font-extrabold uppercase text-ink-900">Tihar</span>
           <span className="tile-corner-title relative font-display font-extrabold uppercase text-ink-900">Jail</span>
-          <Tokens players={jailed} className="inset-0" />
         </div>
         <span className="tile-corner-sub absolute bottom-[4%] left-0 right-[32%] font-semibold uppercase tracking-wide text-ink-600">
           Just
@@ -60,7 +45,6 @@ export const CornerTile: React.FC<Props> = ({
         >
           visiting
         </span>
-        <Tokens players={visiting} className="bottom-[14%] left-[14%] right-[34%] top-[70%]" />
       </div>
     );
   }
@@ -109,7 +93,6 @@ export const CornerTile: React.FC<Props> = ({
       <span className="tile-corner-icon">{icon}</span>
       <span className="tile-corner-title font-display font-extrabold uppercase tracking-tight text-ink-900">{title}</span>
       {sub && <span className="tile-corner-sub font-semibold text-ink-600">{sub}</span>}
-      <Tokens players={playersOnTile} className="inset-x-0 bottom-[5%] h-[45%] px-[6%]" />
     </div>
   );
 };
