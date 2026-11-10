@@ -16,6 +16,7 @@ import { DeedCard } from './components/board/DeedCard';
 import { PlayerToken } from './components/board/PlayerToken';
 import { PropertyActions } from './components/board/PropertyActions';
 import { Brand } from './components/common/Brand';
+import { CoverPage } from './components/cover/CoverPage';
 import { ConfirmModal, Modal } from './components/common/Modal';
 import { Lobby, NetRole } from './components/lobby/Lobby';
 import { RoomCard } from './components/sidebar/LeftSidebar';
@@ -160,6 +161,9 @@ function useAnimatedPositions(state: GameState) {
 export const App: React.FC = () => {
   const [localPlayerId, setLocalPlayerId] = useState(getLocalPlayerId);
   const [savedGame, setSavedGame] = useState<SavedGame | null>(loadSavedGame);
+  // Cover page: the first thing you see in a tab (not again on refresh mid-game)
+  const [showCover, setShowCover] = useState(() => safeGet('session', 'bazaar_cover_seen') !== '1');
+  const [inviteRoom] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() ?? null);
   const [profile, setProfile] = useState<PlayerProfile>(() => loadProfile(localPlayerId));
   const [state, dispatchLocal] = useReducer(gameReducer, profile, createInitialState);
   const stateRef = useRef(state);
@@ -1037,6 +1041,15 @@ export const App: React.FC = () => {
       <div className="sr-only" aria-live="polite">
         {state.phase === 'PLAYING' && current ? (isMyTurn ? 'Your turn' : `${current.name}'s turn`) : ''}
       </div>
+      {showCover && (
+        <CoverPage
+          joiningRoom={inviteRoom}
+          onEnter={() => {
+            safeSet('session', 'bazaar_cover_seen', '1');
+            setShowCover(false);
+          }}
+        />
+      )}
     </div>
   );
 };

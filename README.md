@@ -4,6 +4,7 @@ An Indian-themed property-trading board game that runs entirely in the browser. 
 
 ## Features
 
+- **3D cover page** — a dark "Diwali night in the bazaar" welcome screen: strings of fairy lights, floating diyas with flickering flames, drifting gold dust and coins, and a gold *Bazaar* title over a tilting 3D board with tumbling dice and tokens lapping its edge. Entering plays a soft temple-bell chime. It doubles as the loading screen while photos and fonts are fetched; built with CSS 3D, so it's instant and light on phones, and still for people who prefer reduced motion.
 - **40-tile Indian board** — cities from Old Delhi to Malabar Hill, four railway stations, Tata Power and Jal Board, Kismat and Khazana cards, and the Shuru, Tihar Jail, Chai Break and Police Custody corners.
 - **Full rules** — buying, auctions for skipped properties, rent with full-set bonus, houses and hotels with even building and a limited bank supply, mortgages, debt settlement and bankruptcy.
 - **Tihar Jail** — get out right away by paying the ₹50 fine, using a Get Out of Jail Free card, or rolling doubles. Otherwise you sit out one round and then walk out free.

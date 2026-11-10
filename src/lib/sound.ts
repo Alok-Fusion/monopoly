@@ -165,6 +165,34 @@ class SoundEngine {
     osc.stop(now + 0.14);
   }
 
+  /** Soft temple-bell chime for the cover page. */
+  public playChime() {
+    if (!this.enabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    // A bell is a fundamental plus a few inharmonic partials that fade at different rates
+    [
+      [523.25, 0.16, 2.2],
+      [1046.5 * 1.01, 0.07, 1.4],
+      [1567.98 * 0.99, 0.05, 1.0],
+      [2637.0, 0.025, 0.6],
+    ].forEach(([freq, level, decay]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq!, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(level!, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + decay!);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + decay! + 0.05);
+    });
+  }
+
   public playVictory() {
     if (!this.enabled) return;
     this.initCtx();

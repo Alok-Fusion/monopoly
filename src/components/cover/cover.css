@@ -1,0 +1,744 @@
+/* ------------------------------------------------------------------ */
+/* Cover page — Diwali night in the bazaar, built in CSS 3D            */
+/* ------------------------------------------------------------------ */
+
+.cover-root {
+  --night-1: #161230;
+  --night-2: #0b0a1a;
+  --night-3: #05050b;
+  --gold-1: #fff3c4;
+  --gold-2: #fcd34d;
+  --gold-3: #f59e0b;
+  --gold-4: #b45309;
+  --flame: #ffb347;
+  --cream: #fbf3e2;
+
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--cream);
+  background:
+    radial-gradient(ellipse 55% 40% at 50% 62%, rgba(245, 158, 11, 0.16), transparent 70%),
+    radial-gradient(ellipse 80% 60% at 50% 30%, var(--night-1) 0%, var(--night-2) 55%, var(--night-3) 100%);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s ease;
+}
+.cover-root.cover-exit {
+  opacity: 0;
+  transform: scale(1.05);
+  pointer-events: none;
+}
+.cover-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.7) 100%);
+  pointer-events: none;
+  z-index: 7;
+}
+
+/* Out-of-focus lights drifting in the dark */
+.cover-bokeh {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.cover-bokeh span {
+  position: absolute;
+  border-radius: 9999px;
+  mix-blend-mode: screen;
+  animation: coverDrift 26s ease-in-out infinite alternate;
+}
+
+/* A string of fairy lights sagging across the top */
+.cover-lights {
+  position: absolute;
+  left: -2%;
+  right: -2%;
+  top: 0;
+  height: clamp(70px, 14vh, 130px);
+  pointer-events: none;
+  z-index: 6;
+}
+.cover-lights svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.cover-bulb {
+  position: absolute;
+  width: 9px;
+  height: 13px;
+  margin-left: -4.5px;
+  border-radius: 50% 50% 50% 50% / 40% 40% 60% 60%;
+  animation: coverTwinkle 2.8s ease-in-out infinite;
+}
+.cover-bulb::before {
+  /* the little metal cap */
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: -3px;
+  width: 5px;
+  height: 4px;
+  border-radius: 1px;
+  background: #3a3550;
+}
+
+/* Floating diyas (clay oil lamps) with flickering flames */
+.cover-diya {
+  position: absolute;
+  pointer-events: none;
+  animation: coverBob 6s ease-in-out infinite;
+}
+.cover-diya svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.cover-diya-flame {
+  transform-origin: 50% 100%;
+  transform-box: fill-box;
+  animation: coverFlicker 0.18s ease-in-out infinite alternate;
+}
+.cover-diya-glow {
+  animation: coverGlow 2.4s ease-in-out infinite alternate;
+}
+
+/* Gold dust rising through the light */
+.cover-dust {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.cover-dust span {
+  position: absolute;
+  bottom: -10px;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: var(--gold-2);
+  box-shadow: 0 0 6px 1px rgba(252, 211, 77, 0.8);
+  animation: coverRiseDust 12s linear infinite;
+}
+
+/* ------------------------------ Title ------------------------------ */
+.cover-title {
+  position: relative;
+  z-index: 5;
+  text-align: center;
+  perspective: 900px;
+}
+.cover-kicker {
+  display: block;
+  font-family: Poppins, system-ui, sans-serif;
+  font-weight: 600;
+  font-size: clamp(11px, 1.9vmin, 16px);
+  letter-spacing: 0.55em;
+  text-indent: 0.55em;
+  text-transform: uppercase;
+  color: rgba(253, 230, 138, 0.85);
+}
+.cover-bazaar {
+  position: relative;
+  display: block;
+  margin-top: clamp(-4px, -0.6vmin, 0px);
+  font-family: 'Rozha One', Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(66px, 17vmin, 180px);
+  line-height: 1.02;
+  letter-spacing: 0.01em;
+  transform-style: preserve-3d;
+  animation: coverTitleTilt 10s ease-in-out infinite;
+}
+/* Back layer gives the letters a little cast-gold depth */
+.cover-bazaar-depth {
+  color: #5b2a06;
+  text-shadow:
+    0 1px 0 #7c3a0a,
+    0 2px 0 #6b3108,
+    0 3px 0 #5b2a06,
+    0 4px 0 #4a2205,
+    0 10px 30px rgba(0, 0, 0, 0.6);
+}
+.cover-bazaar-face {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    var(--gold-4) 0%,
+    var(--gold-3) 18%,
+    var(--gold-1) 34%,
+    var(--gold-2) 46%,
+    var(--gold-3) 62%,
+    var(--gold-1) 80%,
+    var(--gold-3) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 22px rgba(245, 158, 11, 0.35));
+  animation: coverGlint 7s ease-in-out infinite;
+}
+.cover-subtitle {
+  margin-top: clamp(4px, 1.2vmin, 12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1em;
+  font-family: Poppins, system-ui, sans-serif;
+  font-weight: 500;
+  font-size: clamp(10px, 1.7vmin, 14px);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: rgba(251, 243, 226, 0.62);
+}
+.cover-subtitle::before,
+.cover-subtitle::after {
+  content: '';
+  width: clamp(20px, 7vmin, 70px);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(252, 211, 77, 0.7), transparent);
+}
+
+/* ------------------------------ 3D scene ------------------------------ */
+.cover-stage {
+  --rx: 0deg;
+  --ry: 0deg;
+  --board: min(74vw, 40vh, 420px);
+  position: relative;
+  z-index: 4;
+  width: calc(var(--board) * 1.25);
+  height: calc(var(--board) * 1.02);
+  margin-top: clamp(4px, 1vmin, 12px);
+  perspective: 1100px;
+  perspective-origin: 50% 0%;
+}
+/* Warm pool of light on the table under the board */
+.cover-spotlight {
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: calc(var(--board) * 1.9);
+  height: calc(var(--board) * 0.9);
+  transform: translate(-50%, -50%);
+  background: radial-gradient(ellipse at center, rgba(251, 191, 36, 0.32), rgba(245, 158, 11, 0.1) 40%, transparent 70%);
+  filter: blur(10px);
+  pointer-events: none;
+}
+.cover-scene {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform 0.35s ease-out;
+}
+.cover-board-tilt {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  width: var(--board);
+  height: var(--board);
+  margin-left: calc(var(--board) / -2);
+  transform-style: preserve-3d;
+  transform: rotateX(57deg) rotateZ(-12deg);
+  animation: coverSway 14s ease-in-out infinite;
+}
+.cover-board {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #2a1a0e, #140c06);
+  padding: 1.6%;
+  box-shadow:
+    inset 0 0 0 1.5px rgba(252, 211, 77, 0.8),
+    inset 0 0 0 4px #1a0f07,
+    inset 0 0 0 5px rgba(252, 211, 77, 0.35),
+    0 0 50px rgba(245, 158, 11, 0.25);
+}
+.cover-board-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: 1px;
+  grid-template-columns: 1.4fr repeat(9, 1fr) 1.4fr;
+  grid-template-rows: 1.4fr repeat(9, 1fr) 1.4fr;
+  background: #c9b48f;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cover-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #fffcf5, #f2e7d0);
+  font-size: calc(var(--board) / 30);
+  overflow: hidden;
+}
+.cover-cell-bar {
+  position: absolute;
+}
+.cover-center {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(52, 211, 153, 0.22), transparent 60%),
+    linear-gradient(160deg, #0f4a40, #0a2a25);
+}
+.cover-center-logo {
+  font-family: 'Rozha One', Georgia, serif;
+  font-size: calc(var(--board) / 8.5);
+  background: linear-gradient(180deg, var(--gold-1), var(--gold-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 0 #4a2205);
+  transform: rotate(-45deg);
+}
+/* Board edges: polished rosewood with a brass lip */
+.cover-side {
+  position: absolute;
+  background: linear-gradient(180deg, #4a2c15, #1d1007);
+  box-shadow: inset 0 1px 0 rgba(252, 211, 77, 0.5);
+}
+.cover-side-front {
+  left: 0;
+  top: 100%;
+  width: 100%;
+  height: calc(var(--board) / 20);
+  transform-origin: top;
+  transform: rotateX(-90deg);
+}
+.cover-side-back {
+  left: 0;
+  bottom: 100%;
+  width: 100%;
+  height: calc(var(--board) / 20);
+  transform-origin: bottom;
+  transform: rotateX(90deg);
+}
+.cover-side-right {
+  top: 0;
+  left: 100%;
+  width: calc(var(--board) / 20);
+  height: 100%;
+  transform-origin: left;
+  transform: rotateY(90deg);
+  background: linear-gradient(90deg, #3d2411, #150b05);
+}
+.cover-side-left {
+  top: 0;
+  right: 100%;
+  width: calc(var(--board) / 20);
+  height: 100%;
+  transform-origin: right;
+  transform: rotateY(-90deg);
+  background: linear-gradient(270deg, #3d2411, #150b05);
+}
+.cover-board-shadow {
+  position: absolute;
+  inset: -6%;
+  border-radius: 20px;
+  background: rgba(0, 0, 0, 0.75);
+  filter: blur(20px);
+  transform: translateZ(calc(var(--board) / -10));
+}
+
+/* Tokens travelling round the board, standing upright */
+.cover-token-track {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+.cover-token {
+  position: absolute;
+  width: calc(var(--board) / 11);
+  height: calc(var(--board) / 11);
+  margin: calc(var(--board) / -22) 0 0 calc(var(--board) / -22);
+  transform-style: preserve-3d;
+  animation: coverLap 16s linear infinite;
+}
+.cover-token-stand {
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 100%;
+  transform: rotateX(-80deg) translateY(-30%);
+  transform-style: preserve-3d;
+}
+.cover-token-puck {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  font-size: calc(var(--board) / 17);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.55);
+  animation: coverHop 0.5s ease-in-out infinite alternate;
+}
+
+/* Dice tumbling above the board */
+.cover-dice {
+  position: absolute;
+  left: 50%;
+  top: 13%;
+  display: flex;
+  gap: calc(var(--board) / 14);
+  transform: translateX(-50%) translateZ(60px);
+  transform-style: preserve-3d;
+}
+.cover-die {
+  --die: calc(var(--board) / 7.5);
+  width: var(--die);
+  height: var(--die);
+  transform-style: preserve-3d;
+  animation: coverDieBounce 2.6s cubic-bezier(0.3, 0.6, 0.4, 1) infinite;
+}
+.cover-die .die-cube {
+  animation: coverDieTumble 2.6s cubic-bezier(0.25, 0.7, 0.35, 1) infinite;
+}
+.cover-die:nth-child(2),
+.cover-die:nth-child(2) .die-cube {
+  animation-delay: -0.9s;
+}
+
+/* Spinning gold coins */
+.cover-coins {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  perspective: 600px;
+  z-index: 3;
+}
+.cover-coin-float {
+  position: absolute;
+  animation: coverFloat 7s ease-in-out infinite;
+}
+.cover-coin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-family: 'Rozha One', Georgia, serif;
+  color: #6b3108;
+  background: radial-gradient(circle at 35% 30%, #fff7c2 0%, #fcd34d 38%, #d97706 80%, #7c2d12 100%);
+  box-shadow:
+    inset 0 0 0 3px rgba(124, 45, 18, 0.55),
+    inset 0 0 0 6px rgba(253, 230, 138, 0.55),
+    0 0 18px rgba(245, 158, 11, 0.45),
+    0 8px 18px rgba(0, 0, 0, 0.5);
+  animation: coverCoinSpin 3s linear infinite;
+}
+
+/* ------------------------------ Call to action ------------------------------ */
+.cover-cta {
+  position: relative;
+  z-index: 6;
+  margin-top: clamp(4px, 1.5vmin, 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-height: 96px;
+}
+.cover-play {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.8em 2.4em;
+  border-radius: 9999px;
+  font-family: Poppins, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: clamp(15px, 2.4vmin, 20px);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #1a0f05;
+  background: linear-gradient(180deg, #fde68a 0%, #fbbf24 45%, #f59e0b 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 0 1px rgba(253, 230, 138, 0.5),
+    0 10px 34px rgba(245, 158, 11, 0.45),
+    0 0 70px rgba(245, 158, 11, 0.25);
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.cover-play:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 0 1px rgba(253, 230, 138, 0.7),
+    0 14px 40px rgba(245, 158, 11, 0.6),
+    0 0 90px rgba(245, 158, 11, 0.35);
+}
+.cover-play:active {
+  transform: translateY(1px) scale(0.98);
+}
+.cover-play:focus-visible {
+  outline: 2px solid var(--gold-1);
+  outline-offset: 5px;
+}
+.cover-play::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  transform: skewX(-20deg);
+  animation: coverShine 3.6s ease-in-out infinite;
+}
+.cover-hint {
+  font-family: Poppins, system-ui, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(251, 243, 226, 0.4);
+}
+.cover-progress {
+  width: min(260px, 66vw);
+  height: 3px;
+  border-radius: 9999px;
+  background: rgba(253, 230, 138, 0.12);
+  overflow: hidden;
+}
+.cover-progress > div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--gold-3), var(--gold-1));
+  box-shadow: 0 0 12px rgba(252, 211, 77, 0.8);
+  transition: width 0.3s ease;
+}
+
+/* ------------------------------ Motion ------------------------------ */
+@keyframes coverSway {
+  0%,
+  100% {
+    transform: rotateX(57deg) rotateZ(-14deg);
+  }
+  50% {
+    transform: rotateX(52deg) rotateZ(10deg);
+  }
+}
+@keyframes coverTitleTilt {
+  0%,
+  100% {
+    transform: rotateX(6deg) rotateY(-6deg);
+  }
+  50% {
+    transform: rotateX(-3deg) rotateY(6deg);
+  }
+}
+@keyframes coverGlint {
+  0%,
+  100% {
+    background-position: 100% 0;
+  }
+  50% {
+    background-position: 0% 0;
+  }
+}
+@keyframes coverLap {
+  0% {
+    left: 94%;
+    top: 94%;
+  }
+  25% {
+    left: 6%;
+    top: 94%;
+  }
+  50% {
+    left: 6%;
+    top: 6%;
+  }
+  75% {
+    left: 94%;
+    top: 6%;
+  }
+  100% {
+    left: 94%;
+    top: 94%;
+  }
+}
+@keyframes coverHop {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-22%);
+  }
+}
+@keyframes coverDieBounce {
+  0% {
+    transform: translateY(-70%);
+  }
+  30% {
+    transform: translateY(30%);
+  }
+  45% {
+    transform: translateY(-10%);
+  }
+  60% {
+    transform: translateY(22%);
+  }
+  75%,
+  100% {
+    transform: translateY(18%);
+  }
+}
+@keyframes coverDieTumble {
+  0% {
+    transform: rotateX(0deg) rotateY(0deg) rotateZ(0deg);
+  }
+  60% {
+    transform: rotateX(450deg) rotateY(630deg) rotateZ(90deg);
+  }
+  75%,
+  100% {
+    transform: rotateX(450deg) rotateY(720deg) rotateZ(90deg);
+  }
+}
+@keyframes coverFloat {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-6deg);
+  }
+  50% {
+    transform: translateY(-26px) rotate(6deg);
+  }
+}
+@keyframes coverCoinSpin {
+  to {
+    transform: rotateY(360deg);
+  }
+}
+@keyframes coverDrift {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(40px, -30px) scale(1.15);
+  }
+}
+@keyframes coverTwinkle {
+  0%,
+  100% {
+    opacity: 1;
+    filter: brightness(1.1);
+  }
+  50% {
+    opacity: 0.55;
+    filter: brightness(0.8);
+  }
+}
+@keyframes coverBob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-14px) rotate(3deg);
+  }
+}
+@keyframes coverFlicker {
+  from {
+    transform: scale(1, 1) skewX(-2deg);
+  }
+  to {
+    transform: scale(0.94, 1.08) skewX(3deg);
+  }
+}
+@keyframes coverGlow {
+  from {
+    opacity: 0.75;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes coverRiseDust {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-105vh) translateX(30px);
+    opacity: 0;
+  }
+}
+@keyframes coverShine {
+  0%,
+  60% {
+    left: -60%;
+  }
+  100% {
+    left: 130%;
+  }
+}
+@keyframes coverRise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.cover-rise {
+  animation: coverRise 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Low-motion fallback: a still, fully readable cover */
+@media (prefers-reduced-motion: reduce) {
+  .cover-root *,
+  .cover-root *::before,
+  .cover-root *::after {
+    animation: none !important;
+  }
+  .cover-dust,
+  .cover-coins {
+    display: none;
+  }
+}
+/* Fewer moving parts and tighter type on small screens */
+@media (max-width: 640px) {
+  .cover-coin-float:nth-child(n + 4),
+  .cover-dust span:nth-child(2n),
+  .cover-bokeh span:nth-child(2n) {
+    display: none;
+  }
+  .cover-subtitle {
+    letter-spacing: 0.2em;
+  }
+  .cover-subtitle::before,
+  .cover-subtitle::after {
+    width: 14px;
+  }
+}
