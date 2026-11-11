@@ -80,6 +80,16 @@ Things to know about Render's free plan:
 - If the server restarts or you redeploy, games in progress are lost (the free plan has no saved storage). Redeploy between games.
 - 750 free hours a month, enough to keep one server running all month.
 
+**Keeping the server awake all the time (optional)**
+
+The site already pings the server whenever someone has it open. To keep it awake even when nobody does, [`.github/workflows/keep-server-awake.yml`](.github/workflows/keep-server-awake.yml) pings it every 5 minutes from GitHub:
+
+1. Make the repository public (GitHub Actions minutes are free and unlimited for public repositories).
+2. In GitHub, open **Settings** → **Secrets and variables** → **Actions** → **Variables** and add `GAME_SERVER_URL` with your Render address.
+3. Merge the workflow into `main` (GitHub only runs schedules from the default branch). To test it, open the **Actions** tab → **Keep game server awake** → **Run workflow**.
+
+This uses about 744 of Render's 750 free hours a month. GitHub may delay scheduled runs when it's busy, and it pauses them after 60 days without commits; re-enable from the Actions tab.
+
 **Voice chat** sends audio directly between players, not through the game server. It needs the game on an `https://` address, and players on different networks usually need a TURN relay:
 
 1. Create a free account at [Metered](https://dashboard.metered.ca/signup?tool=turnserver) (20 GB of relay traffic a month).

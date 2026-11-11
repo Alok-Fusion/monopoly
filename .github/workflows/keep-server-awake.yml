@@ -1,0 +1,37 @@
+# Keeps the free Render game server awake by pinging it every 5 minutes, even when
+# nobody has the game open (Render sleeps a free server after 15 quiet minutes).
+#
+# Setup: Settings → Secrets and variables → Actions → Variables → New repository variable
+#   Name:  GAME_SERVER_URL
+#   Value: your Render address, e.g. https://bazaar-server.onrender.com
+#
+# Notes: GitHub only runs schedules from the default branch (main), may delay runs when
+# it's busy, and pauses schedules after 60 days without any commits to the repository.
+name: Keep game server awake
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # lets you run it by hand from the Actions tab
+
+permissions: {}
+
+concurrency:
+  group: keep-server-awake
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping the game server
+        env:
+          GAME_SERVER_URL: ${{ vars.GAME_SERVER_URL }}
+        run: |
+          if [ -z "$GAME_SERVER_URL" ]; then
+            echo "::warning::Add a GAME_SERVER_URL repository variable (your Render address) to turn this on."
+            exit 0
+          fi
+          # A sleeping server takes about a minute to wake, so allow for that
+          curl --fail --silent --show-error --retry 3 --retry-delay 15 --retry-all-errors --max-time 90 "${GAME_SERVER_URL%/}/health"
