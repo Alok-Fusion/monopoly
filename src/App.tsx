@@ -5,7 +5,6 @@ import { createInitialState, gameReducer } from './engine/state';
 import { getTile, BOARD_SIZE } from './engine/board';
 import { getBotNextAction } from './engine/bots';
 import {
-  actorOfAction,
   canMortgage,
   decisionOwner,
   decisionTimeLimitMs,
@@ -18,8 +17,8 @@ import {
 } from './engine/rules';
 import { calculateRent } from './engine/rent';
 import { priceOf } from './engine/festivals';
-import { net, NetStatus, normalizeRoomCode } from './net/peer';
-import { chooseSeat, lastSeatIn, rememberSeat } from './net/seats';
+import { net, NetStatus, normalizeRoomCode, warmUpServer } from './net/socket';
+import { lastSeatIn, rememberSeat } from './lib/lastSeat';
 import { voice, useVoice } from './net/voice';
 import { sounds } from './lib/sound';
 import { formatINR } from './lib/format';
@@ -207,6 +206,10 @@ export const App: React.FC = () => {
   /** Room we're trying to get into (kept after a failure so "Try again" knows where). */
   const [joiningCode, setJoiningCode] = useState<string | null>(null);
   const [netError, setNetError] = useState<string | null>(null);
+  /** Who has the room's controls (the server can hand them on if the host leaves). */
+  const [hostId, setHostId] = useState<PlayerId | null>(null);
+  /** The free game server was asleep and is starting up. */
+  const [serverWaking, setServerWaking] = useState(false);
   const connected = netStatus === 'connected';
   const connecting = netStatus === 'connecting';
 
@@ -231,20 +234,13 @@ export const App: React.FC = () => {
 
   const { positions: displayPositions, animating } = useAnimatedPositions(state);
 
-  /** Guests send actions to the host; the host (or an offline game) applies them directly. */
-  const dispatch = useCallback(
-    (action: GameAction) => {
-      if (roleRef.current === 'guest') net.sendActionToHost(action, localPlayerId);
-      else dispatchLocal(action);
-    },
-    [localPlayerId]
-  );
+  /** Online, every move goes to the game server, which applies it for everyone; offline, it's applied here. */
+  const dispatch = useCallback((action: GameAction) => {
+    if (roleRef.current !== 'offline') net.sendAction(action);
+    else dispatchLocal(action);
+  }, []);
 
   /* ----------------------------- networking ----------------------------- */
-
-  useEffect(() => {
-    if (role === 'host') net.broadcastState(state);
-  }, [state, role]);
 
   const resetToOffline = useCallback(() => {
     net.cleanup();
@@ -252,60 +248,55 @@ export const App: React.FC = () => {
     setRoomCode('');
     setNetStatus('idle');
     setJoiningCode(null);
+    setHostId(null);
     dispatchLocal({ type: 'SYNC_STATE', state: createInitialState({ ...profileRef.current, id: localIdRef.current }) });
   }, []);
 
   // The handlers live on a long-lived singleton, so re-running this effect (StrictMode,
   // hot reload) never tears down a connection that is in use.
   useEffect(() => {
-    net.onStateSync = (synced) => dispatchLocal({ type: 'SYNC_STATE', state: synced });
-
-    net.onActionReceived = (action, senderId) => {
-      if (roleRef.current !== 'host') return;
-      // A guest may only act on their own behalf; host-only actions are ignored.
-      if (actorOfAction(stateRef.current, action) === senderId) dispatchLocal(action);
-    };
-
-    net.onPlayerJoined = (req) => {
-      const s = stateRef.current;
-      const seat = chooseSeat(s, req.player, req.seatHint, req.livePlayerIds, localIdRef.current);
-      if (seat.kind === 'reject') return req.reject(seat.reason);
-      req.accept(seat.playerId);
-      if (seat.kind === 'existing') {
-        // Back in their seat: send the game straight away, then mark them online
-        req.reply(s);
-        dispatchLocal({ type: 'SET_PLAYER_CONNECTED', playerId: seat.playerId, connected: true });
-      } else {
-        dispatchLocal({ type: 'ADD_PLAYER', profile: req.player });
-      }
-    };
-
-    net.onPlayerLeft = (playerId) => {
-      if (stateRef.current.phase === 'LOBBY') dispatchLocal({ type: 'REMOVE_PLAYER', playerId });
-      else dispatchLocal({ type: 'SET_PLAYER_CONNECTED', playerId, connected: false });
-    };
-
-    net.onSeatAssigned = (playerId) => {
-      // The host put us back in the seat this device (or this name) had before
+    net.onWelcome = (playerId) => {
+      // The server put us back in the seat this device (or this name) had before
+      if (playerId === localIdRef.current) return;
+      localIdRef.current = playerId;
       setLocalPlayerId(playerId);
       safeSet('session', 'dt_player_id', playerId);
       setProfile((p) => ({ ...p, id: playerId }));
     };
 
-    net.onJoinRejected = (reason) => {
+    net.onState = (synced, host) => {
+      dispatchLocal({ type: 'SYNC_STATE', state: synced });
+      setHostId(host);
+      setRole(host === localIdRef.current ? 'host' : 'guest');
+    };
+
+    net.onRejected = (reason) => {
       setRoomInUrl(null);
       setNetError(reason);
       setRole('offline');
       setRoomCode('');
       setJoiningCode(null);
+      setHostId(null);
       dispatchLocal({ type: 'SYNC_STATE', state: createInitialState({ ...profileRef.current, id: localIdRef.current }) });
     };
 
+    net.onWaking = () => setServerWaking(true);
+
     net.onStatus = (status, message) => {
       setNetStatus(status);
+      if (status !== 'connecting') setServerWaking(false);
       if (message) setNetError(message);
       else if (status === 'connected') setNetError(null);
     };
+  }, []);
+
+  // The free game server sleeps when idle: start waking it as soon as someone opens the
+  // site (it's usually up by the time they press Create or Join), and keep it awake
+  // while the page is open and visible.
+  useEffect(() => {
+    warmUpServer();
+    const id = setInterval(() => document.visibilityState === 'visible' && warmUpServer(), 30_000);
+    return () => clearInterval(id);
   }, []);
 
   // Phones freeze background tabs and drop Wi-Fi: check the link as soon as we're back
@@ -325,15 +316,14 @@ export const App: React.FC = () => {
     const code = makeRoomCode();
     setNetError(null);
     setJoiningCode(null);
-    net.createRoom(
-      code,
-      (ready) => {
-        setRole('host');
-        setRoomCode(ready);
-        dispatchLocal({ type: 'SET_ROOM', roomCode: ready, isHost: true });
+    net.createRoom(code, { ...profileRef.current, id: localIdRef.current }, {
+      onJoined: () => {
+        setRoomCode(code);
+        // A refresh brings the host straight back into their room
+        setRoomInUrl(code);
       },
-      (err) => setNetError(err)
-    );
+      onError: (err) => setNetError(err),
+    });
   };
 
   const joinRoom = useCallback((input: string) => {
@@ -346,7 +336,6 @@ export const App: React.FC = () => {
     net.joinRoom(code, me, {
       seatHint: hint && hint !== me.id ? hint : undefined,
       onJoined: () => {
-        setRole('guest');
         setRoomCode(code);
         setJoiningCode(null);
         // So a refresh (or the browser restoring the tab) rejoins this room
@@ -397,7 +386,7 @@ export const App: React.FC = () => {
   }, [inVoice]);
 
   // Remember our seat so a new tab on this device can sit back down in it
-  const seated = role === 'guest' && connected && !!state.players[localPlayerId];
+  const seated = role !== 'offline' && connected && !!state.players[localPlayerId];
   useEffect(() => {
     if (seated && roomCode) rememberSeat(roomCode, localPlayerId);
   }, [seated, roomCode, localPlayerId]);
@@ -453,7 +442,7 @@ export const App: React.FC = () => {
 
   const auctionActive = !!state.activeAuction;
   useEffect(() => {
-    if (!auctionActive || role === 'guest') return;
+    if (!auctionActive || role !== 'offline') return;
     const id = setInterval(() => dispatchLocal({ type: 'AUCTION_TICK' }), 1000);
     return () => clearInterval(id);
   }, [auctionActive, role]);
@@ -461,7 +450,7 @@ export const App: React.FC = () => {
   /** Bumped when a disconnected player's grace period runs out, so autopilot looks again. */
   const [graceTick, setGraceTick] = useState(0);
   useEffect(() => {
-    if (role === 'guest' || state.phase !== 'PLAYING' || animating || isRolling) return;
+    if (role !== 'offline' || state.phase !== 'PLAYING' || animating || isRolling) return;
     const now = Date.now();
     const automated = (id: PlayerId | undefined) => isAutomated(id ? state.players[id] : undefined, now);
 
@@ -519,11 +508,13 @@ export const App: React.FC = () => {
   const decision = decisionOwner(state);
   const decisionPlayer = decision ? state.players[decision.playerId] : undefined;
   const timedDecision = timerOn && !!decision && !!decisionPlayer && !decisionPlayer.isBot && decisionPlayer.connected;
-  const msLeft = timedDecision ? state.phaseStartedAt + decisionTimeLimitMs(state, decision!.kind) - now : null;
+  /** Online countdowns use the server's clock, so everyone sees the same time left. */
+  const clockOffset = role !== 'offline' ? net.clockOffset : 0;
+  const msLeft = timedDecision ? state.phaseStartedAt + decisionTimeLimitMs(state, decision!.kind) - (now + clockOffset) : null;
 
   // The host plays a default move for humans who let the clock run out.
   useEffect(() => {
-    if (role === 'guest' || !timedDecision || !decision || animating || isRolling) return;
+    if (role !== 'offline' || !timedDecision || !decision || animating || isRolling) return;
     const due = state.phaseStartedAt + decisionTimeLimitMs(state, decision.kind) - Date.now();
     const { playerId, kind } = decision;
     const t = setTimeout(() => {
@@ -596,7 +587,7 @@ export const App: React.FC = () => {
     else if (types.has('AUCTION') && fresh.some((l) => /won/.test(l.message))) sounds.playAuctionGavel();
     else if (types.has('BUY') || types.has('TRADE')) sounds.playCash();
     else if (types.has('CARD')) sounds.playCard();
-    else if (role === 'guest' && fresh.some((l) => l.type === 'ROLL' && l.playerId !== localPlayerId)) sounds.playDiceRoll();
+    else if (role !== 'offline' && fresh.some((l) => l.type === 'ROLL' && l.playerId !== localPlayerId)) sounds.playDiceRoll();
   }, [state.logs, role, localPlayerId]);
 
   const lastMsgId = useRef<string | null>(state.messages[state.messages.length - 1]?.id ?? null);
@@ -655,7 +646,7 @@ export const App: React.FC = () => {
   const counterBase = counterDraft ? findTrade(state, counterDraft.id) : undefined;
   const connectedHumans = state.playerOrder.filter((id) => !state.players[id]?.isBot && state.players[id]?.connected).length;
   const canEditRules = role !== 'guest' && state.phase === 'LOBBY';
-  const currentWaitMs = state.phase === 'PLAYING' ? reconnectWaitMs(current, Math.max(now, Date.now())) : null;
+  const currentWaitMs = state.phase === 'PLAYING' ? reconnectWaitMs(current, Math.max(now, Date.now()) + clockOffset) : null;
   const reconnectWait = current && currentWaitMs ? { name: current.name, secondsLeft: Math.ceil(currentWaitMs / 1000) } : undefined;
 
   const toggleSound = () => setSoundOn(sounds.toggleSound());
@@ -747,7 +738,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-bg min-h-[100dvh] text-slate-100">
-      {role === 'guest' && netStatus === 'reconnecting' && (
+      {role !== 'offline' && netStatus === 'reconnecting' && (
         <div
           className="fixed inset-x-0 top-0 z-[60] flex items-center justify-center gap-3 bg-amber-500 px-4 py-2 text-sm font-semibold text-ink-950"
           role="status"
@@ -756,7 +747,7 @@ export const App: React.FC = () => {
           <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-ink-950/30 border-t-ink-950" aria-hidden="true" />
         </div>
       )}
-      {role === 'guest' && netStatus === 'disconnected' && (
+      {role !== 'offline' && netStatus === 'disconnected' && (
         <div className="fixed inset-x-0 top-0 z-[60] flex flex-wrap items-center justify-center gap-3 bg-rose-600 px-4 py-2 text-sm font-medium text-white">
           <WifiOff size={16} /> Lost connection to the host.
           <button type="button" className="btn btn-sm bg-white text-rose-700 hover:bg-rose-50" onClick={() => net.reconnectNow()}>
@@ -778,11 +769,12 @@ export const App: React.FC = () => {
           connected={connected}
           connecting={connecting}
           joiningCode={joiningCode}
+          serverWaking={serverWaking}
+          hostId={hostId}
           netError={netError}
           onUpdateProfile={updateProfile}
           onAddBot={(difficulty) => dispatch({ type: 'ADD_BOT', difficulty })}
           onRemovePlayer={(playerId) => {
-            if (role === 'host' && !state.players[playerId]?.isBot) net.rejectGuest(playerId, 'The host removed you from the room.');
             dispatch({ type: 'REMOVE_PLAYER', playerId });
           }}
           onSetPlayerTeam={(playerId, teamId) => dispatch({ type: 'SET_PLAYER_TEAM', playerId, teamId })}
@@ -841,7 +833,7 @@ export const App: React.FC = () => {
                 msLeft={msLeft}
                 timerFor={decision && decision.playerId !== currentId ? decisionPlayer?.name : undefined}
                 reconnectWait={reconnectWait}
-                onSkipReconnectWait={role === 'host' && currentId ? () => dispatchLocal({ type: 'SKIP_RECONNECT_WAIT', playerId: currentId }) : undefined}
+                onSkipReconnectWait={role === 'host' && currentId ? () => dispatch({ type: 'SKIP_RECONNECT_WAIT', playerId: currentId }) : undefined}
                 onTileClick={inspectTile}
                 onRoll={runRoll}
                 onEndTurn={() => dispatch({ type: 'END_TURN' })}

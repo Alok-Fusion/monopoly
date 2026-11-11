@@ -8,7 +8,7 @@ import { MAX_PLAYERS_CAP } from '../../engine/state';
 import { Brand } from '../common/Brand';
 import { RulesPanel } from '../modals/GameSettingsModal';
 import { inviteLink, REACH_NOTE } from '../../lib/invite';
-import { normalizeRoomCode } from '../../net/peer';
+import { normalizeRoomCode } from '../../net/socket';
 import { VoiceControl } from '../sidebar/VoiceControl';
 import { nameTaken } from '../../engine/rules';
 
@@ -24,6 +24,10 @@ interface Props {
   connecting: boolean;
   /** Room code we're joining (or failed to join, for "Try again"). */
   joiningCode: string | null;
+  /** Who has the room's controls (online only). */
+  hostId: PlayerId | null;
+  /** The game server is waking up from sleep (free hosting). */
+  serverWaking: boolean;
   netError: string | null;
   onUpdateProfile: (profile: PlayerProfile) => void;
   onAddBot: (difficulty: BotDifficulty) => void;
@@ -87,6 +91,8 @@ export const Lobby: React.FC<Props> = ({
   connected,
   connecting,
   joiningCode,
+  hostId,
+  serverWaking,
   netError,
   onUpdateProfile,
   onAddBot,
@@ -283,7 +289,7 @@ export const Lobby: React.FC<Props> = ({
               {role === 'offline' ? (
                 <div className="space-y-3">
                   <p className="text-xs leading-relaxed text-slate-400">
-                    Create a room and share the link. Friends join straight from their browser — keep this tab open while you play.
+                    Create a room and share the link. Friends can join from anywhere, and the game keeps going even if someone's connection drops.
                   </p>
                   <button type="button" className="btn btn-secondary w-full" onClick={onCreateRoom} disabled={connecting}>
                     {connecting && !joiningCode ? 'Creating room…' : 'Create online room'}
@@ -311,6 +317,12 @@ export const Lobby: React.FC<Props> = ({
                       Join
                     </button>
                   </form>
+                  {connecting && serverWaking && (
+                    <p className="flex items-center gap-2 rounded-lg bg-amber-400/10 px-3 py-2 text-xs text-amber-100 ring-1 ring-amber-300/30" role="status">
+                      <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-amber-200/30 border-t-amber-300" aria-hidden="true" />
+                      Starting the game server. After a quiet spell this can take up to a minute.
+                    </p>
+                  )}
                   {connecting && joiningCode && (
                     <p className="flex items-center gap-2 rounded-lg bg-black/25 px-3 py-2 text-xs text-slate-300 ring-1 ring-white/5" role="status">
                       <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-amber-300" aria-hidden="true" />
@@ -413,7 +425,7 @@ export const Lobby: React.FC<Props> = ({
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="truncate text-sm font-semibold text-white">{p.name}</span>
                           {isMe && <span className="chip bg-amber-400/15 text-amber-300">You</span>}
-                          {i === 0 && !p.isBot && role !== 'offline' && <span className="chip bg-white/10 text-slate-300">Host</span>}
+                          {pid === hostId && role !== 'offline' && <span className="chip bg-white/10 text-slate-300">Host</span>}
                           {p.isBot && (
                             <span className="chip bg-white/10 text-slate-300">Bot · {p.botDifficulty === 'hard' ? 'tough' : p.botDifficulty}</span>
                           )}

@@ -1,0 +1,16 @@
+# Render Blueprint for Bazaar's game server (the frontend stays on Vercel). See README.
+services:
+  - type: web
+    name: bazaar-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Which sites may connect (comma-separated). Localhost and home-network addresses are always allowed.
+      - key: ALLOWED_ORIGINS
+        value: https://monopoly-cyan.vercel.app

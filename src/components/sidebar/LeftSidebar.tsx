@@ -54,7 +54,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({ roomCode, role, connected, c
       </div>
       {role === 'host' && (
         <p className="text-[11px] leading-snug text-slate-500">
-          Keep this tab open — the game runs in your browser. {invite.reach !== 'internet' && <span className="text-amber-200/80">{REACH_NOTE[invite.reach]}</span>}
+          The game runs on the Bazaar server, so it carries on if you refresh or step away. {invite.reach !== 'internet' && <span className="text-amber-200/80">{REACH_NOTE[invite.reach]}</span>}
         </p>
       )}
     </div>

@@ -13,7 +13,7 @@ An Indian-themed property-trading board game that runs entirely in the browser. 
 - **Open trade board** — trade cash, properties and Get Out of Jail Free cards. Offers go on a public board that every player can see, and they never interrupt play: the receiver can accept, decline or send a **counter-offer** whenever they like, even several turns later. Several deals can be open at once (one per pair of players, up to 3 offers each). If a property in an open offer changes hands, that offer is cancelled automatically. Bots haggle too — lowball them and they'll name their price.
 - **Teams of two** — partners pay no rent to each other, share colour sets and inherit each other's assets.
 - **Bots** — easy, normal and tough. If a player drops out mid-game, the game waits 60 seconds for them to come back before autopilot plays their turns (the host can tap **Play for them** to skip the wait).
-- **Online rooms** — PeerJS/WebRTC. The host's browser runs the game and validates every action from guests. Every player in a room has their own name and colour.
+- **Online rooms** — a small game server (WebSockets, hosted on Render) runs each room, so friends can join from any city or network, and the game keeps going if anyone refreshes or leaves. Every player in a room has their own name and colour.
 - **Voice chat** — join the call from the lobby or during the game. Mute yourself (or press **M**), mute one person just for you, and see who's talking. Your mic stays off until you join.
 - **Game length** — Quick (20 rounds), Standard (30), Long (45) or Endless. With a limit, the richest player (cash + property value) wins when time runs out, so games always finish.
 - **Festivals** — every third round a festival bends one rule for that round: Diwali Dhamaka (half-price houses), Monsoon Season (double utility rent), IPL Fever (double railway rent), Shaadi Season (double rent on one colour set), Startup Boom (double salary), Income Tax Raid (double tax), Bharat Bandh (no rent anywhere) and the Great Indian Sale (25% off unowned property). The board announces how many rounds until the next one.
@@ -42,39 +42,63 @@ npm run preview
 
 ## Online play
 
-1. Start the game with `npm run dev` and open it.
-2. In the lobby click **Create online room**, then **Copy invite** and send the link (or show the QR code).
-3. Keep your tab open while you play — the game runs in the host's browser and friends connect directly to it.
+Online rooms run on a small game server. Every player connects out to it over a WebSocket, so it works across cities, mobile data and office Wi-Fi. The server holds the game, checks every move, and runs the bots, auction clock and turn timer, so the room carries on even if the host refreshes or closes their tab. After 20 seconds without the host, the next player gets the host controls.
 
-**Who can join?**
+**Playing locally (two terminals)**
 
-- **Same Wi-Fi:** when you host from `localhost`, the invite link automatically uses your computer's network address (e.g. `http://192.168.0.109:3000/?room=AB3CD`), so friends on the same Wi-Fi can open it. The first time, Windows may ask to allow Node.js through the firewall — allow it on private networks.
-- **Over the internet:** run `npm run build` and upload the `dist/` folder to any static host (Netlify, Vercel, GitHub Pages…). Invite links then use that public address.
-- **Phones on mobile data / strict networks:** these block direct connections, so players need a TURN relay. See below.
+```bash
+npm run dev           # the game, http://localhost:3000
+```
 
-**Setting up the relay (recommended once the game is online)**
+```bash
+npm run dev:server    # the game server, ws://localhost:8787
+```
 
-If players see *"one of your networks is blocking direct connections"* (or `ICE failed, add a TURN server` in the browser console), the game needs a relay. On Vercel:
+Friends on the same Wi-Fi can use the invite link straight away: it uses your computer's network address.
 
-1. Create a free account at [Metered](https://dashboard.metered.ca/signup?tool=turnserver) (free tier: 20 GB of relay traffic a month).
-2. Copy your credentials address. It looks like `https://yourapp.metered.live/api/v1/turn/credentials?apiKey=YOUR_KEY`.
-3. In Vercel, open your project → **Settings** → **Environment Variables**, and add `TURN_CREDENTIALS_URL` with that address.
-4. Redeploy. To check it, open `https://your-site/api/turn`: you should see a list of servers rather than an error.
+**Putting the game server online (free, one time)**
 
-The key stays on the server, in [`api/turn.js`](api/turn.js). Traffic only uses the relay when a direct connection isn't possible, and it stays encrypted between players. On other hosts, set `VITE_TURN_URL`, `VITE_TURN_USERNAME` and `VITE_TURN_CREDENTIAL` when building instead.
+The frontend stays on Vercel; the game server goes on [Render](https://render.com) (free plan).
 
-**Voice chat** needs the game to be on an `https://` address (a plain `http://192.168…` link can't use the microphone).
+1. Push this repository to GitHub (Render deploys from it).
+2. Create a free Render account, then **New** → **Web Service**, and pick this repository and branch.
+3. Fill in:
+   - **Root Directory:** `server`
+   - **Build Command:** `npm install && npm run build`
+   - **Start Command:** `npm start`
+   - **Instance Type:** Free
+   - **Environment variable:** `ALLOWED_ORIGINS` = your site, e.g. `https://monopoly-cyan.vercel.app`
+
+   Or choose **New** → **Blueprint**: [`render.yaml`](render.yaml) fills all of this in.
+4. When it's live, copy its address (like `https://bazaar-server.onrender.com`). Opening it should say "Bazaar game server is running".
+5. In Vercel, open your project → **Settings** → **Environment Variables**, add `VITE_GAME_SERVER_URL` with that address, and redeploy.
+
+Things to know about Render's free plan:
+
+- After 15 minutes with nobody playing, the server sleeps. The next person to create or join a room waits about a minute while it wakes up; the game shows "Starting the game server" and keeps trying for 90 seconds.
+- While anyone is playing, the server stays awake.
+- If the server restarts or you redeploy, games in progress are lost (the free plan has no saved storage). Redeploy between games.
+- 750 free hours a month, enough to keep one server running all month.
+
+**Voice chat** sends audio directly between players, not through the game server. It needs the game on an `https://` address, and players on different networks usually need a TURN relay:
+
+1. Create a free account at [Metered](https://dashboard.metered.ca/signup?tool=turnserver) (20 GB of relay traffic a month).
+2. Copy your credentials address, like `https://yourapp.metered.live/api/v1/turn/credentials?apiKey=YOUR_KEY`.
+3. In Vercel, add `TURN_CREDENTIALS_URL` with that address and redeploy. Check it at `https://your-site/api/turn`.
+
+The key stays on the server in [`api/turn.js`](api/turn.js). On other hosts, set `VITE_TURN_URL`, `VITE_TURN_USERNAME` and `VITE_TURN_CREDENTIAL` when building instead.
 
 **Staying connected**
 
-- Guests reconnect on their own after a Wi-Fi blip or when they come back to a phone that was locked — a yellow bar shows while it happens. If it can't get back within a few minutes, a **Try again** button appears.
-- A player can always get their seat back: refresh the page, open the invite link in a new tab, or — on another device — join with the same name they were playing as.
-- The host sees **📶 Reconnecting…** next to anyone who dropped out, and the game waits 60 seconds on their turn before autopilot (**🤖 Autopilot**) takes over. The host can skip the wait with **Play for them**.
+- Players reconnect on their own after a Wi-Fi blip or when they come back to a phone that was locked; a yellow bar shows while it happens. If it can't get back within a few minutes, a **Try again** button appears.
+- A player can always get their seat back: refresh the page, open the invite link in a new tab, or join from another device with the same name.
+- Anyone who drops out shows as **📶 Reconnecting…**, and the game waits 60 seconds on their turn before autopilot (**🤖 Autopilot**) takes over. The host can skip the wait with **Play for them**.
 - The join box accepts either the room code or a whole pasted invite link.
 
 ## Project layout
 
-- `src/engine/` — game rules: `state.ts` (reducer), `rules.ts` (shared validity checks), `rent.ts`, `bots.ts`, `board.ts`, `cards.ts`
-- `src/net/peer.ts` — PeerJS host/guest networking
+- `src/engine/` — game rules: `state.ts` (reducer), `rules.ts` (shared validity checks), `rent.ts`, `bots.ts`, `board.ts`, `cards.ts`. The game server runs the same code.
+- `src/net/socket.ts` — the game's connection to the server; `protocol.ts` — the messages both sides send; `voice.ts` — voice chat
+- `server/` — the game server: `room.ts` (one room: seats, moves, bots, timers), `node.ts` (the Node.js WebSocket server that runs on Render)
 - `src/components/` — board, lobby, sidebars and dialogs
 "# monopoly" 

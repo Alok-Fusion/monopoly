@@ -1,11 +1,13 @@
 import { useSyncExternalStore } from 'react';
-import type { MediaConnection } from 'peerjs';
-import { net, VoiceMember } from './peer';
+import { Peer, type MediaConnection } from 'peerjs';
+import { net } from './socket';
+import { peerOptions } from './ice';
+import type { VoiceMember } from './protocol';
 
 /**
- * Voice chat. Every pair of players in the call has its own direct audio link (nothing
- * goes through a server), and the host keeps the list of who is in the call. The mic is
- * only touched after the player presses Join.
+ * Voice chat. Every pair of players in the call has its own direct audio link (the audio
+ * never goes through the game server), and the game server keeps the list of who is in
+ * the call. The mic is only touched after the player presses Join.
  */
 
 export interface VoiceSnapshot {
@@ -36,6 +38,8 @@ interface Meter {
 }
 
 const HEAL_EVERY_MS = 4000;
+/** How long to wait for our voice address before giving up on joining. */
+const PEER_OPEN_MS = 12_000;
 /** A call with no audio after this long is dropped and dialled again. */
 const CALL_STALL_MS = 20_000;
 /** An offer nobody replied to was probably lost in a matchmaking-server blip: retry sooner. */
@@ -71,6 +75,8 @@ class VoiceChat {
   private listeners = new Set<() => void>();
   private playerId = '';
   private stream: MediaStream | null = null;
+  /** Our address for direct audio calls (separate from the game connection). */
+  private peer: Peer | null = null;
   private calls = new Map<string, Call>();
   private waiting = new Map<string, { call: MediaConnection; timer: ReturnType<typeof setTimeout> }>();
   private healTimer: ReturnType<typeof setInterval> | null = null;
@@ -87,11 +93,10 @@ class VoiceChat {
       this.update({ members });
       this.reconcile();
     };
-    net.onIncomingCall = (call) => this.incoming(call);
-    // After a reconnect we have a new address, so tell the room again
+    // The server forgets who's in the call when our game link drops, so tell it again
     net.onLinkReady = () => {
       if (this.snapshot.status !== 'on') return;
-      net.setVoiceState(this.playerId, true, this.snapshot.muted);
+      this.announce();
       this.reconcile();
     };
   }
@@ -149,6 +154,25 @@ class VoiceChat {
       return;
     }
 
+    let peer: Peer;
+    try {
+      peer = await this.openPeer();
+    } catch (e) {
+      console.warn('Bazaar: voice could not connect', e);
+      stream.getTracks().forEach((t) => t.stop());
+      if (attempt !== this.attempt) return;
+      this.closeAudioContext();
+      this.update({ status: 'off' });
+      this.fail('Voice chat could not connect. Check your internet connection and try again.');
+      return;
+    }
+    if (attempt !== this.attempt) {
+      peer.destroy();
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    this.peer = peer;
+
     this.stream = stream;
     stream.getAudioTracks()[0]?.addEventListener('ended', () => {
       if (this.stream !== stream) return;
@@ -159,14 +183,50 @@ class VoiceChat {
     this.update({ status: 'on' });
     this.healTimer = setInterval(() => this.heal(), HEAL_EVERY_MS);
     this.meterTimer = setInterval(() => this.readMeters(), METER_EVERY_MS);
-    net.setVoiceState(playerId, true, false);
+    this.announce();
     this.reconcile();
+  }
+
+  private announce() {
+    if (this.snapshot.status === 'on' && this.peer?.id) net.setVoiceState(true, this.snapshot.muted, this.peer.id);
+  }
+
+  /** Registers with the matchmaking server so other players can call us. */
+  private async openPeer(): Promise<Peer> {
+    const options = await peerOptions();
+    const peer = await new Promise<Peer>((resolve, reject) => {
+      const p = new Peer(options);
+      const timer = setTimeout(() => {
+        p.destroy();
+        reject(new Error('timed out'));
+      }, PEER_OPEN_MS);
+      p.on('open', () => {
+        clearTimeout(timer);
+        resolve(p);
+      });
+      p.on('error', (err) => {
+        if (p.open) {
+          console.warn('Bazaar: voice', err); // e.g. calling someone who just left
+          return;
+        }
+        clearTimeout(timer);
+        p.destroy();
+        reject(err);
+      });
+    });
+    peer.on('call', (call) => this.peer === peer && this.incoming(call));
+    peer.on('disconnected', () => {
+      setTimeout(() => {
+        if (this.peer === peer && !peer.destroyed && peer.disconnected) peer.reconnect();
+      }, 1000);
+    });
+    return peer;
   }
 
   leave() {
     this.attempt += 1;
     if (this.snapshot.status === 'off') return;
-    if (this.snapshot.status === 'on') net.setVoiceState(this.playerId, false, false);
+    if (this.snapshot.status === 'on') net.setVoiceState(false, false);
     if (this.healTimer) clearInterval(this.healTimer);
     if (this.meterTimer) clearInterval(this.meterTimer);
     this.healTimer = this.meterTimer = null;
@@ -178,6 +238,8 @@ class VoiceChat {
     this.waiting.clear();
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
+    this.peer?.destroy();
+    this.peer = null;
     this.meters.clear();
     this.closeAudioContext();
     this.update({ status: 'off', muted: false, speaking: EMPTY, linked: EMPTY });
@@ -193,7 +255,7 @@ class VoiceChat {
     const muted = !this.snapshot.muted;
     this.stream?.getAudioTracks().forEach((t) => (t.enabled = !muted));
     this.update({ muted });
-    net.setVoiceState(this.playerId, true, muted);
+    this.announce();
   }
 
   /** Mute one person for this player only. */
@@ -211,7 +273,7 @@ class VoiceChat {
   /** Makes the live calls match the room list. */
   private reconcile() {
     if (this.snapshot.status !== 'on' || !this.stream) return;
-    const me = net.localPeerId;
+    const me = this.peer?.id;
     if (!me) return;
     const others = this.snapshot.members.filter((m) => m.peerId !== me);
     const present = new Set(others.map((m) => m.peerId));
@@ -230,8 +292,9 @@ class VoiceChat {
   }
 
   private dial(peerId: string) {
-    if (!this.stream) return;
-    const media = net.callPeer(peerId, this.stream);
+    const peer = this.peer;
+    if (!this.stream || !peer || peer.destroyed || peer.disconnected) return;
+    const media = peer.call(peerId, this.stream);
     if (media) this.track(peerId, media);
   }
 

@@ -1,0 +1,23 @@
+{
+  "name": "bazaar-server",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "esbuild node.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=dist/server.mjs",
+    "start": "node dist/server.mjs",
+    "dev": "npm run build && node dist/server.mjs",
+    "check": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "esbuild": "^0.24.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.8.7",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.6.3"
+  }
+}
