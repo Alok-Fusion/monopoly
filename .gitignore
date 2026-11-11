@@ -44,3 +44,7 @@ desktop.ini
 
 # Claude Code
 .claude/
+
+# Launch video output (large files)
+brag-output/
+brag-output-*/
