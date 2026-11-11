@@ -2,6 +2,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { TILES } from '../../engine/board';
 import { GROUP_COLORS, TILE_EMBLEMS } from '../../lib/tiles';
 import { sounds } from '../../lib/sound';
+import { Credit } from '../common/Credit';
 import './cover.css';
 
 interface Props {
@@ -403,6 +404,7 @@ export const CoverPage: React.FC<Props> = ({ onEnter, joiningRoom }) => {
       </div>
 
       <div className="cover-vignette" aria-hidden="true" />
+      <Credit className="cover-credit" />
     </main>
   );
 };

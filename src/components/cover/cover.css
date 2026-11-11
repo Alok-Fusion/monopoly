@@ -508,6 +508,22 @@
   transform: skewX(-20deg);
   animation: coverShine 3.6s ease-in-out infinite;
 }
+.cover-credit {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 8; /* above the vignette so the link stays clickable */
+  margin: 0;
+  text-align: center;
+  font-family: Poppins, system-ui, sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: rgba(251, 243, 226, 0.5);
+}
+.cover-credit a {
+  color: var(--gold-2);
+}
 .cover-hint {
   font-family: Poppins, system-ui, sans-serif;
   font-size: 11px;

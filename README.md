@@ -1,6 +1,8 @@
 # Bazaar
 
-An Indian-themed property-trading board game that runs entirely in the browser. Play against bots on one device, or create a room and share the link — friends connect peer-to-peer to your browser (no server or sign-up).
+An Indian-themed property-trading board game that runs entirely in the browser. Play against bots on one device, or create a room and share the link with friends anywhere (no sign-up).
+
+**Play it:** [monopoly-cyan.vercel.app](https://monopoly-cyan.vercel.app) · Made by [Alok Kushwaha](https://github.com/Alok-Fusion)
 
 ## Features
 
@@ -111,4 +113,11 @@ The key stays on the server in [`api/turn.js`](api/turn.js). On other hosts, set
 - `src/net/socket.ts` — the game's connection to the server; `protocol.ts` — the messages both sides send; `voice.ts` — voice chat
 - `server/` — the game server: `room.ts` (one room: seats, moves, bots, timers), `node.ts` (the Node.js WebSocket server that runs on Render)
 - `src/components/` — board, lobby, sidebars and dialogs
-"# monopoly" 
+
+## Credits
+
+Made by **[Alok Kushwaha](https://github.com/Alok-Fusion)**. Landmark photos are from [Unsplash](https://unsplash.com).
+
+## License
+
+[MIT](LICENSE) © 2026 Alok Kushwaha. You're free to use, change and share this code, as long as you keep the copyright notice and license with it.

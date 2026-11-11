@@ -1,6 +1,8 @@
 {
   "name": "bazaar-server",
   "private": true,
+  "author": "Alok Kushwaha (https://github.com/Alok-Fusion)",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20"

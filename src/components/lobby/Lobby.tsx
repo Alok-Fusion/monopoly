@@ -6,6 +6,7 @@ import { TOKEN_EMOJIS, PlayerToken } from '../board/PlayerToken';
 import { formatTeamName, getTeamColor } from '../../lib/format';
 import { MAX_PLAYERS_CAP } from '../../engine/state';
 import { Brand } from '../common/Brand';
+import { Credit } from '../common/Credit';
 import { RulesPanel } from '../modals/GameSettingsModal';
 import { inviteLink, REACH_NOTE } from '../../lib/invite';
 import { normalizeRoomCode } from '../../net/socket';
@@ -521,6 +522,8 @@ export const Lobby: React.FC<Props> = ({
           </div>
         </div>
       </div>
+
+      <Credit className="relative mt-8 text-center text-xs text-slate-500 [&_a]:text-amber-300/90" />
 
       {/* Sticky start bar on phones and tablets */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-ink-950/85 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl lg:hidden">

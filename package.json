@@ -2,6 +2,13 @@
   "name": "richup-indian-monopoly",
   "private": true,
   "version": "1.0.0",
+  "description": "Bazaar, the Indian property-trading game",
+  "author": "Alok Kushwaha (https://github.com/Alok-Fusion)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Alok-Fusion/monopoly.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
