@@ -524,6 +524,9 @@
 .cover-credit a {
   color: var(--gold-2);
 }
+.cover-credit a.credit-policy {
+  color: rgba(251, 243, 226, 0.7);
+}
 .cover-hint {
   font-family: Poppins, system-ui, sans-serif;
   font-size: 11px;

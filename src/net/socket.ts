@@ -1,5 +1,6 @@
 import type { GameAction, GameState, PlayerProfile } from '../types/game';
 import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage, type VoiceMember } from './protocol';
+import { rememberSeat, seatKeyIn } from '../lib/lastSeat';
 
 /**
  * The game's link to the Bazaar game server (one WebSocket). Every player connects out
@@ -60,6 +61,8 @@ interface Session {
   player: PlayerProfile;
   create: boolean;
   seatHint?: string;
+  /** The server's secret for our seat (proves a reconnect is really us). */
+  seatKey?: string;
   /** Got the game at least once (so losing the link means "reconnect", not "join failed"). */
   joined: boolean;
   startedAt: number;
@@ -165,7 +168,7 @@ export class NetworkManager {
 
     ws.onopen = () => {
       if (!alive()) return;
-      this.send({ type: 'JOIN', version: PROTOCOL_VERSION, player: s.player, seatHint: s.seatHint, create: s.create });
+      this.send({ type: 'JOIN', version: PROTOCOL_VERSION, player: s.player, seatHint: s.seatHint, seatKey: s.seatKey ?? seatKeyIn(s.code), create: s.create });
       this.heartbeat = setInterval(() => alive() && this.beat(), HEARTBEAT_MS);
     };
     ws.onmessage = (event) => {
@@ -198,6 +201,10 @@ export class NetworkManager {
       case 'WELCOME':
         s.player = { ...s.player, id: msg.playerId };
         s.seatHint = undefined;
+        if (typeof msg.seatKey === 'string') {
+          s.seatKey = msg.seatKey;
+          rememberSeat(s.code, msg.playerId, msg.seatKey);
+        }
         this.onWelcome?.(msg.playerId);
         return;
       case 'STATE': {

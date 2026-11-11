@@ -10,6 +10,7 @@ import {
   TileState,
   PlayerProfile,
   PlayerStats,
+  TradeOffer,
 } from '../types/game';
 import {
   BOARD_SIZE,
@@ -42,6 +43,7 @@ import {
   uniqueName,
 } from './rules';
 import { formatINR, formatTeamName } from '../lib/format';
+import { cleanChat, cleanName, cleanSettings, cleanText, isHexColor, isTeamId, isTokenId } from './safety';
 
 export const MAX_PLAYERS_CAP = 8;
 export const AUCTION_SECONDS = 12;
@@ -93,6 +95,20 @@ function ensureUniqueIdentities(state: GameState) {
     if (colorTaken(view, p.color)) p.color = PLAYER_COLORS.find((c) => !colorTaken(view, c)) ?? p.color;
     seen.push(p);
   });
+}
+
+/** Just the terms of a trade offer, so nothing else a player sends gets stored. */
+function offerTerms(o: Omit<TradeOffer, 'id' | 'status'>): Omit<TradeOffer, 'id' | 'status'> {
+  return {
+    proposerId: o.proposerId,
+    targetId: o.targetId,
+    offerCash: o.offerCash,
+    offerProperties: [...o.offerProperties],
+    offerJailCards: o.offerJailCards,
+    requestCash: o.requestCash,
+    requestProperties: [...o.requestProperties],
+    requestJailCards: o.requestJailCards,
+  };
 }
 
 function makePlayer(profile: PlayerProfile, cash: number, extra: Partial<PlayerState> = {}): PlayerState {
@@ -778,7 +794,7 @@ function baseReducer(state: GameState, action: GameAction): GameState {
       if (!player || player.bankrupt || !auction.activeBidderIds.includes(player.id)) return state;
       if (auction.highestBidderId === player.id) return state;
       const amount = Math.floor(action.amount);
-      if (amount <= auction.highestBid || amount > player.cash) return state;
+      if (!Number.isSafeInteger(amount) || amount <= auction.highestBid || amount > player.cash) return state;
 
       auction.highestBid = amount;
       auction.highestBidderId = player.id;
@@ -1011,7 +1027,7 @@ function baseReducer(state: GameState, action: GameAction): GameState {
 
     case 'PROPOSE_TRADE': {
       if (!playing || proposalProblem(next, action.offer)) return state;
-      next.trades.push({ ...action.offer, id: uid('trade'), status: 'PENDING', counterCount: 0, createdAt: Date.now() });
+      next.trades.push({ ...offerTerms(action.offer), id: uid('trade'), status: 'PENDING', counterCount: 0, createdAt: Date.now() });
       const proposer = next.players[action.offer.proposerId];
       if (proposer) proposer.lastTradeRound = next.round;
       const target = next.players[action.offer.targetId];
@@ -1028,7 +1044,7 @@ function baseReducer(state: GameState, action: GameAction): GameState {
       if (action.offer.proposerId !== trade.targetId || action.offer.targetId !== trade.proposerId) return state;
       if (validateTrade(next, action.offer)) return state;
       const i = next.trades.indexOf(trade);
-      next.trades[i] = { ...action.offer, id: uid('trade'), status: 'PENDING', counterCount: count, createdAt: Date.now() };
+      next.trades[i] = { ...offerTerms(action.offer), id: uid('trade'), status: 'PENDING', counterCount: count, createdAt: Date.now() };
       const from = next.players[action.offer.proposerId];
       const to = next.players[action.offer.targetId];
       addLog(next, { type: 'TRADE', playerId: from?.id, message: `${from?.name} sent ${to?.name} a counter-offer.` });
@@ -1241,9 +1257,30 @@ function baseReducer(state: GameState, action: GameAction): GameState {
     }
 
     case 'SEND_CHAT': {
-      const text = action.message.text.trim().slice(0, 200);
+      const text = cleanChat(action.message?.text);
       if (!text) return state;
-      const msg: ChatMessage = { ...action.message, text, id: uid('chat'), timestamp: Date.now() };
+      const sender = next.players[action.message.senderId];
+      // Who sent it comes from their seat, so nobody can post under another player's name.
+      // Only the game itself (timer notices) sends without a seat.
+      const msg: ChatMessage = sender
+        ? {
+            senderId: sender.id,
+            senderName: sender.name,
+            senderColor: sender.color,
+            teamId: sender.teamId,
+            isTeamOnly: !!action.message.isTeamOnly && !!sender.teamId && next.settings.mode === 'TEAMS',
+            text,
+            id: uid('chat'),
+            timestamp: Date.now(),
+          }
+        : {
+            senderId: 'system',
+            senderName: cleanText(action.message.senderName, 30) || 'Game',
+            senderColor: isHexColor(action.message.senderColor) ? action.message.senderColor : '#94A3B8',
+            text,
+            id: uid('chat'),
+            timestamp: Date.now(),
+          };
       next.messages.push(msg);
       if (next.messages.length > 100) next.messages.shift();
       return next;
@@ -1293,10 +1330,11 @@ function baseReducer(state: GameState, action: GameAction): GameState {
       players.forEach((p) => p.teamId && (counts[p.teamId] += 1));
       const teamId = ALL_TEAMS.find((t) => counts[t] < 2) ?? 'team-1';
       // Nobody in a room shares a name or a colour: newcomers get the next free one
-      const name = uniqueName(next, action.profile.name || 'Guest');
-      const color = colorTaken(next, action.profile.color) ? freeColor(next) : action.profile.color;
+      const name = uniqueName(next, cleanName(action.profile.name) || 'Guest');
+      const color = !isHexColor(action.profile.color) || colorTaken(next, action.profile.color) ? freeColor(next) : action.profile.color;
+      const tokenId = isTokenId(action.profile.tokenId) ? action.profile.tokenId : 'auto-rickshaw';
 
-      next.players[action.profile.id] = makePlayer({ ...action.profile, name, color, teamId }, next.settings.startingCash);
+      next.players[action.profile.id] = makePlayer({ id: action.profile.id, name, color, tokenId, teamId }, next.settings.startingCash);
       next.playerOrder.push(action.profile.id);
       addLog(next, { type: 'SYSTEM', message: `${name} joined the room.` });
       return next;
@@ -1306,10 +1344,10 @@ function baseReducer(state: GameState, action: GameAction): GameState {
       const p = next.players[action.profile.id];
       if (!p) return state;
       // Names and colours identify players on the board and in the log, so they are never shared
-      const wanted = action.profile.name.trim().replace(/\s+/g, ' ').slice(0, 18);
+      const wanted = cleanName(action.profile.name);
       if (wanted && !nameTaken(next, wanted, p.id)) p.name = wanted;
-      p.tokenId = action.profile.tokenId;
-      if (!colorTaken(next, action.profile.color, p.id)) p.color = action.profile.color;
+      if (isTokenId(action.profile.tokenId)) p.tokenId = action.profile.tokenId;
+      if (isHexColor(action.profile.color) && !colorTaken(next, action.profile.color, p.id)) p.color = action.profile.color;
       return next;
     }
 
@@ -1341,8 +1379,7 @@ function baseReducer(state: GameState, action: GameAction): GameState {
 
     case 'UPDATE_SETTINGS': {
       if (next.phase !== 'LOBBY') return state;
-      next.settings = { ...next.settings, ...action.settings };
-      next.settings.maxPlayers = Math.max(next.settings.maxPlayers, 2);
+      next.settings = cleanSettings(next.settings, action.settings);
       Object.values(next.players).forEach((p) => (p.cash = next.settings.startingCash));
       return next;
     }
@@ -1350,7 +1387,7 @@ function baseReducer(state: GameState, action: GameAction): GameState {
     case 'SET_PLAYER_TEAM': {
       if (next.phase !== 'LOBBY') return state;
       const p = next.players[action.playerId];
-      if (!p) return state;
+      if (!p || (action.teamId && !isTeamId(action.teamId))) return state;
       if (action.teamId) {
         const size = Object.values(next.players).filter((o) => o.teamId === action.teamId && o.id !== p.id).length;
         if (size >= 2) return state;

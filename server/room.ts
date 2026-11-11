@@ -5,7 +5,8 @@ import { chooseSeat } from '../src/net/seats';
 import { PROTOCOL_VERSION } from '../src/net/protocol';
 import type { ClientMessage, ServerMessage, VoiceMember } from '../src/net/protocol';
 import type { DecisionKind } from '../src/engine/rules';
-import type { GameAction, GameState, PlayerId, PlayerProfile, TokenId } from '../src/types/game';
+import { cleanName, isHexColor, isTeamId, isTokenId } from '../src/engine/safety';
+import type { GameAction, GameState, PlayerId, PlayerProfile } from '../src/types/game';
 
 /**
  * One Bazaar room on the server: it holds the game, applies every move, and runs the
@@ -51,32 +52,54 @@ const SAVE_AFTER_MS = 2000;
 const MAX_MESSAGE_CHARS = 32_000;
 const RATE_WINDOW_MS = 5000;
 const RATE_MAX = 80;
+/** A connection must say which seat it wants within this time. */
+const JOIN_DEADLINE_MS = 15_000;
+/** Chat flood limit per player. */
+const CHAT_WINDOW_MS = 10_000;
+const CHAT_MAX = 8;
 
 /** Actions only the room's host may send (for anyone). */
 const HOST_ACTIONS = new Set<GameAction['type']>(['START_GAME', 'ADD_BOT', 'REMOVE_PLAYER', 'UPDATE_SETTINGS', 'RESET_GAME', 'SKIP_RECONNECT_WAIT', 'SET_PLAYER_TEAM']);
 /** Actions only the server itself performs. */
 const SERVER_ONLY = new Set<GameAction['type']>(['SYNC_STATE', 'SET_ROOM', 'ADD_PLAYER', 'SET_PLAYER_CONNECTED', 'LAND_ON_TILE', 'AUCTION_TICK']);
-const TOKENS: TokenId[] = ['auto-rickshaw', 'cricket-bat', 'chai-cup', 'bullet-bike', 'royal-tiger', 'peacock', 'kite', 'elephant'];
 
 const ROOM_NOT_FOUND = 'Room not found. Check the code, or ask for a new invite link.';
 
 interface Client {
   socket: Socket;
+  /** Network address, used only to keep removed players out of this room (memory only). */
+  ip?: string;
   playerId?: PlayerId;
   lastHeard: number;
   windowStart: number;
   windowCount: number;
+  chatTimes: number[];
+}
+
+/** Compares two secrets in constant time, so timing can't reveal how much matched. */
+function sameSecret(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** A long random secret (only the device that holds a seat knows it). */
+function newSeatKey(): string {
+  const bytes = new Uint8Array(24);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 /** Only accept a profile shaped like one the game itself sends. */
 function cleanProfile(raw: unknown): PlayerProfile | null {
   const p = raw as Partial<PlayerProfile> | null;
   if (!p || typeof p !== 'object') return null;
-  if (typeof p.id !== 'string' || !/^[\w-]{1,40}$/.test(p.id)) return null;
-  const name = typeof p.name === 'string' ? p.name.slice(0, 40) : 'Player';
-  const color = typeof p.color === 'string' && /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : '#3B82F6';
-  const tokenId = TOKENS.includes(p.tokenId as TokenId) ? (p.tokenId as TokenId) : 'auto-rickshaw';
-  return { id: p.id, name, color, tokenId, teamId: p.teamId };
+  if (typeof p.id !== 'string' || !/^[\w-]{1,40}$/.test(p.id) || p.id === 'system') return null;
+  const name = cleanName(p.name) || 'Player';
+  const color = isHexColor(p.color) ? p.color : '#3B82F6';
+  const tokenId = isTokenId(p.tokenId) ? p.tokenId : 'auto-rickshaw';
+  return { id: p.id, name, color, tokenId, teamId: isTeamId(p.teamId) ? p.teamId : undefined };
 }
 
 export class Room {
@@ -84,6 +107,10 @@ export class Room {
   private hostId: PlayerId = '';
   private clients = new Set<Client>();
   private voice = new Map<PlayerId, VoiceMember>();
+  /** Each seat's secret. Never part of the game state, so other players never see it. */
+  private seatKeys = new Map<PlayerId, string>();
+  /** Players the host removed (their ids and addresses): they can't come back to this room. */
+  private banned = new Set<string>();
   /** Until when players' screens are still animating the last move. */
   private busyUntil = 0;
   private lobbyHolds = new Map<PlayerId, unknown>();
@@ -120,12 +147,33 @@ export class Room {
     return this.clients.size === 0;
   }
 
+  /** Someone actually created a game here (not just a visit to a code that doesn't exist). */
+  get hasGame() {
+    return this.state !== null;
+  }
+
+  /** The game has got past the lobby. */
+  get started() {
+    return !!this.state && this.state.phase !== 'LOBBY';
+  }
+
   /* ------------------------------- sockets -------------------------------- */
 
-  connect(socket: Socket) {
+  connect(socket: Socket, ip?: string) {
     const now = this.clock.now();
-    this.clients.add({ socket, lastHeard: now, windowStart: now, windowCount: 0 });
+    const client: Client = { socket, ip, lastHeard: now, windowStart: now, windowCount: 0, chatTimes: [] };
+    this.clients.add(client);
     this.startSweep();
+    // Connections that never ask for a seat are closed, so idle ones can't pile up
+    this.clock.setTimeout(() => {
+      if (!this.clients.has(client) || client.playerId) return;
+      this.clients.delete(client);
+      try {
+        socket.close(4002, 'no join');
+      } catch {
+        /* already closed */
+      }
+    }, JOIN_DEADLINE_MS);
   }
 
   message(socket: Socket, text: string) {
@@ -212,6 +260,9 @@ export class Room {
     if (msg.version !== PROTOCOL_VERSION) return this.refuse(client, 'Bazaar was just updated. Refresh the page to keep playing.');
     const player = cleanProfile(msg.player);
     if (!player) return this.refuse(client, 'Could not join the room. Please reload and try again.');
+    if (this.banned.has(player.id) || (client.ip && this.banned.has(`ip:${client.ip}`))) {
+      return this.refuse(client, 'The host removed you from this room.');
+    }
 
     if (!this.state) {
       if (!msg.create) return this.refuse(client, ROOM_NOT_FOUND);
@@ -223,8 +274,16 @@ export class Room {
     // Two hosts can't make the same room code; the creator coming back is fine
     if (msg.create && !this.state.players[player.id]) return this.refuse(client, 'That room code is already in use. Try creating a new room.');
 
-    const seat = chooseSeat(this.state, player, typeof msg.seatHint === 'string' ? msg.seatHint : undefined, this.livePlayers(client));
+    const live = this.livePlayers(client);
+    const seat = chooseSeat(this.state, player, typeof msg.seatHint === 'string' ? msg.seatHint : undefined, live);
     if (seat.kind === 'reject') return this.refuse(client, seat.reason);
+    // Taking over a seat whose player is still connected needs that seat's secret, so
+    // nobody can knock another player out by copying their id from the game state.
+    const expected = this.seatKeys.get(seat.playerId);
+    const keyOk = typeof msg.seatKey === 'string' && !!expected && sameSecret(msg.seatKey, expected);
+    if (seat.kind === 'existing' && live.has(seat.playerId) && !keyOk) {
+      return this.refuse(client, 'That player is already connected to this room. Join with your own name instead.');
+    }
     if (seat.kind === 'new') this.apply({ type: 'ADD_PLAYER', profile: player });
     this.sit(client, seat.playerId, seat.kind === 'new');
   }
@@ -252,8 +311,10 @@ export class Room {
       }, HOST_HANDOVER_MS);
     }
 
-    this.send(client, { type: 'WELCOME', playerId });
-    this.send(client, { type: 'STATE', state: this.state!, hostId: this.hostId, serverNow: this.clock.now() });
+    let seatKey = this.seatKeys.get(playerId);
+    if (!seatKey) this.seatKeys.set(playerId, (seatKey = newSeatKey()));
+    this.send(client, { type: 'WELCOME', playerId, seatKey });
+    this.send(client, { type: 'STATE', state: this.viewFor(playerId), hostId: this.hostId, serverNow: this.clock.now() });
     this.send(client, { type: 'VOICE_ROSTER', members: [...this.voice.values()] });
     this.schedule();
   }
@@ -268,7 +329,10 @@ export class Room {
         playerId,
         this.clock.setTimeout(() => {
           this.lobbyHolds.delete(playerId);
-          if (!this.livePlayers().has(playerId) && this.state?.phase === 'LOBBY') this.apply({ type: 'REMOVE_PLAYER', playerId });
+          if (!this.livePlayers().has(playerId) && this.state?.phase === 'LOBBY') {
+            this.apply({ type: 'REMOVE_PLAYER', playerId });
+            this.seatKeys.delete(playerId);
+          }
           this.ensureHost();
         }, LOBBY_SEAT_HOLD_MS)
       );
@@ -308,10 +372,23 @@ export class Room {
     }
     const allowed = actor === playerId || (playerId === this.hostId && HOST_ACTIONS.has(action.type));
     if (!allowed) return;
+    if (action.type === 'SEND_CHAT') {
+      const now = this.clock.now();
+      client.chatTimes = client.chatTimes.filter((t) => now - t < CHAT_WINDOW_MS);
+      if (client.chatTimes.length >= CHAT_MAX) return;
+      client.chatTimes.push(now);
+    }
 
     if (action.type === 'REMOVE_PLAYER') {
       if (action.playerId === this.hostId) return;
+      // A removed person stays out: their seat id and network address are blocked for this room
+      const removed = this.state.players[action.playerId];
+      if (removed && !removed.isBot) {
+        this.banned.add(action.playerId);
+        this.clients.forEach((c) => c.playerId === action.playerId && c.ip && this.banned.add(`ip:${c.ip}`));
+      }
       this.clients.forEach((c) => c.playerId === action.playerId && this.refuse(c, 'The host removed you from the room.'));
+      this.seatKeys.delete(action.playerId);
       if (this.voice.delete(action.playerId)) this.publishVoice();
     }
     this.apply(action);
@@ -357,12 +434,31 @@ export class Room {
     this.schedule();
   }
 
+  /**
+   * The game as one player may see it: team-only chat goes to that team alone, so other
+   * players can't read it even by looking at what their browser receives.
+   */
+  private viewFor(playerId: PlayerId): GameState {
+    const s = this.state!;
+    if (!s.messages.some((m) => m.isTeamOnly)) return s;
+    const teamId = s.players[playerId]?.teamId;
+    return { ...s, messages: s.messages.filter((m) => !m.isTeamOnly || (!!teamId && m.teamId === teamId)) };
+  }
+
   private broadcast() {
     this.timers.broadcast = null;
     if (!this.state) return;
-    const text = JSON.stringify({ type: 'STATE', state: this.state, hostId: this.hostId, serverNow: this.clock.now() } satisfies ServerMessage);
+    const serverNow = this.clock.now();
+    // One copy of the message per team (most games: one for everyone)
+    const texts = new Map<string, string>();
     this.clients.forEach((c) => {
       if (!c.playerId) return;
+      const team = this.state!.players[c.playerId]?.teamId ?? '';
+      let text = texts.get(team);
+      if (text === undefined) {
+        text = JSON.stringify({ type: 'STATE', state: this.viewFor(c.playerId), hostId: this.hostId, serverNow } satisfies ServerMessage);
+        texts.set(team, text);
+      }
       try {
         c.socket.send(text);
       } catch {

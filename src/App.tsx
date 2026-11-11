@@ -129,9 +129,12 @@ function setRoomInUrl(code: string | null) {
   }
 }
 
+/** 7 random characters (34 billion possible codes), so rooms can't be found by guessing. */
 function makeRoomCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  return Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  const bytes = new Uint8Array(7);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
 }
 
 /* ------------------------- token step animation ------------------------ */

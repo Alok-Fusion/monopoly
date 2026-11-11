@@ -318,6 +318,17 @@ export const Lobby: React.FC<Props> = ({
                       Join
                     </button>
                   </form>
+                  <p className="text-[11px] leading-snug text-slate-500">
+                    Online play is for ages 13+ (under 18 with a parent&rsquo;s OK). By playing you agree to the{' '}
+                    <a href="/terms" target="_blank" rel="noopener" className="text-slate-300 underline underline-offset-2 hover:text-white">
+                      Terms
+                    </a>{' '}
+                    and{' '}
+                    <a href="/privacy" target="_blank" rel="noopener" className="text-slate-300 underline underline-offset-2 hover:text-white">
+                      Privacy Policy
+                    </a>
+                    .
+                  </p>
                   {connecting && serverWaking && (
                     <p className="flex items-center gap-2 rounded-lg bg-amber-400/10 px-3 py-2 text-xs text-amber-100 ring-1 ring-amber-300/30" role="status">
                       <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-amber-200/30 border-t-amber-300" aria-hidden="true" />
@@ -523,7 +534,7 @@ export const Lobby: React.FC<Props> = ({
         </div>
       </div>
 
-      <Credit className="relative mt-8 text-center text-xs text-slate-500 [&_a]:text-amber-300/90" />
+      <Credit className="relative mt-8 text-center text-xs text-slate-500 [&_a]:text-amber-300/90 [&_a.credit-policy]:text-slate-400" />
 
       {/* Sticky start bar on phones and tablets */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-ink-950/85 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl lg:hidden">

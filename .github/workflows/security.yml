@@ -1,0 +1,48 @@
+# Security checks on every push and pull request, and once a week:
+#  - CodeQL looks through the code for security bugs (results: Security tab → Code scanning)
+#  - npm audit fails if a shipped dependency has a known high-severity vulnerability
+name: Security checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Audit the game
+        run: npm audit --omit=dev --audit-level=high
+      - name: Audit the game server
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: server

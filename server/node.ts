@@ -16,15 +16,66 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
   .filter(Boolean);
 /** An empty room is kept this long so players can come back to it. */
 const EMPTY_ROOM_TTL_MS = 2 * 3600_000;
+/** An empty room whose game never started is kept only this long. */
+const EMPTY_LOBBY_TTL_MS = 10 * 60_000;
 const MAX_ROOMS = 500;
+/** Per network address: open connections at once, and new connections a minute. */
+const MAX_SOCKETS_PER_IP = 16;
+const MAX_CONNECTS_PER_MINUTE = 40;
+/** Open connections across the whole server. */
+const MAX_SOCKETS = 3000;
+
+/** Runs room code, logging (not crashing on) anything unexpected, so one bad room can't take down every game. */
+function guarded(fn: () => void) {
+  try {
+    fn();
+  } catch (e) {
+    console.error('Bazaar: room error', e instanceof Error ? e.message : e);
+  }
+}
 
 const clock = {
   now: () => Date.now(),
-  setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+  setTimeout: (fn: () => void, ms: number) => setTimeout(() => guarded(fn), ms),
   clearTimeout: (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>),
 };
 
 const rooms = new Map<string, { room: Room; emptySince: number | null }>();
+
+/**
+ * The visitor's address, used only (in memory) for the abuse limits below; it is never
+ * stored or logged. Render sits behind Cloudflare, whose CF-Connecting-IP header can't be
+ * set by the visitor; X-Forwarded-For is the fallback.
+ */
+function clientIp(req: http.IncomingMessage): string {
+  const header = (name: string) => {
+    const v = req.headers[name];
+    return (Array.isArray(v) ? v[0] : v)?.split(',')[0]?.trim();
+  };
+  return (header('cf-connecting-ip') || header('true-client-ip') || header('x-forwarded-for') || req.socket.remoteAddress || 'unknown').slice(0, 64);
+}
+const openSockets = new Map<string, number>();
+const recentConnects = new Map<string, number[]>();
+
+function tooManyConnections(ip: string): boolean {
+  if ((openSockets.get(ip) ?? 0) >= MAX_SOCKETS_PER_IP) return true;
+  const now = Date.now();
+  const times = (recentConnects.get(ip) ?? []).filter((t) => now - t < 60_000);
+  if (times.length >= MAX_CONNECTS_PER_MINUTE) {
+    recentConnects.set(ip, times);
+    return true;
+  }
+  times.push(now);
+  recentConnects.set(ip, times);
+  return false;
+}
+
+const SECURITY_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'no-referrer',
+  'cache-control': 'no-store',
+};
 
 function originAllowed(origin: string | undefined): boolean {
   if (!ALLOWED_ORIGINS.length || !origin) return true;
@@ -42,11 +93,11 @@ const server = http.createServer((req, res) => {
   const path = (req.url ?? '/').split('?')[0];
   if (path === '/' || path === '/health') {
     // Also used to wake the server up before players connect
-    res.writeHead(200, { 'content-type': 'text/plain', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
-    res.end(`Bazaar game server is running. Rooms: ${rooms.size}`);
+    res.writeHead(200, { ...SECURITY_HEADERS, 'content-type': 'text/plain; charset=utf-8', 'access-control-allow-origin': '*' });
+    res.end('Bazaar game server is running.');
     return;
   }
-  res.writeHead(404, { 'content-type': 'text/plain' });
+  res.writeHead(404, { ...SECURITY_HEADERS, 'content-type': 'text/plain; charset=utf-8' });
   res.end('Not found');
 });
 
@@ -60,11 +111,14 @@ server.on('upgrade', (req, socket, head) => {
   };
   if (!code || !ROOM_CODE_RE.test(code)) return refuse('404 Not Found');
   if (!originAllowed(req.headers.origin)) return refuse('403 Forbidden');
-  if (!rooms.has(code) && rooms.size >= MAX_ROOMS) return refuse('503 Service Unavailable');
-  wss.handleUpgrade(req, socket, head, (ws) => attach(code, ws));
+  if ((!rooms.has(code) && rooms.size >= MAX_ROOMS) || wss.clients.size >= MAX_SOCKETS) return refuse('503 Service Unavailable');
+  const ip = clientIp(req);
+  if (tooManyConnections(ip)) return refuse('429 Too Many Requests');
+  wss.handleUpgrade(req, socket, head, (ws) => attach(code, ws, ip));
 });
 
-function attach(code: string, ws: WebSocket) {
+function attach(code: string, ws: WebSocket, ip: string) {
+  openSockets.set(ip, (openSockets.get(ip) ?? 0) + 1);
   let entry = rooms.get(code);
   if (!entry) {
     entry = { room: new Room(code, clock, () => {}), emptySince: null };
@@ -77,16 +131,23 @@ function attach(code: string, ws: WebSocket) {
     send: (text) => ws.readyState === ws.OPEN && ws.send(text),
     close: (code, reason) => ws.close(code ?? 1000, reason),
   };
-  room.connect(socket);
+  room.connect(socket, ip);
   ws.on('message', (data, isBinary) => {
-    if (!isBinary) room.message(socket, data.toString());
+    if (!isBinary) guarded(() => room.message(socket, data.toString()));
   });
   let gone = false;
   const leave = () => {
     if (gone) return;
     gone = true;
-    room.disconnect(socket);
-    if (room.isEmpty) entry!.emptySince = Date.now();
+    const left = (openSockets.get(ip) ?? 1) - 1;
+    if (left > 0) openSockets.set(ip, left);
+    else openSockets.delete(ip);
+    guarded(() => room.disconnect(socket));
+    if (!room.isEmpty) return;
+    // Nobody made a game here (a wrong code, or someone guessing codes): forget it now,
+    // so made-up codes can't fill the server up
+    if (!room.hasGame && rooms.get(code) === entry) rooms.delete(code);
+    else entry!.emptySince = Date.now();
   };
   ws.on('close', leave);
   ws.on('error', leave);
@@ -96,9 +157,12 @@ function attach(code: string, ws: WebSocket) {
 setInterval(() => {
   const now = Date.now();
   rooms.forEach((entry, code) => {
-    if (entry.emptySince && now - entry.emptySince > EMPTY_ROOM_TTL_MS) rooms.delete(code);
+    if (entry.emptySince && now - entry.emptySince > (entry.room.started ? EMPTY_ROOM_TTL_MS : EMPTY_LOBBY_TTL_MS)) rooms.delete(code);
   });
-}, 10 * 60_000).unref();
+  recentConnects.forEach((times, ip) => {
+    if (!times.some((t) => now - t < 60_000)) recentConnects.delete(ip);
+  });
+}, 60_000).unref();
 
 server.listen(PORT, () => console.log(`Bazaar game server listening on port ${PORT}`));
 
@@ -109,4 +173,5 @@ const shutdown = () => {
   setTimeout(() => process.exit(0), 3000).unref();
 };
 process.on('SIGTERM', shutdown);
+process.on('unhandledRejection', (e) => console.error('Bazaar: unhandled rejection', e instanceof Error ? e.message : e));
 process.on('SIGINT', shutdown);

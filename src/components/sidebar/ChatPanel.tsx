@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, MessageSquare } from 'lucide-react';
+import { Send, MessageSquare, ShieldCheck, VolumeX } from 'lucide-react';
 import { ChatMessage, PlayerState } from '../../types/game';
 import { EMOTES } from '../board/CenterBoard';
+import { setMuted, unmuteAll, useMutedPlayers } from '../../lib/chatMute';
 
 interface Props {
   messages: ChatMessage[];
@@ -18,8 +19,10 @@ export const ChatPanel: React.FC<Props> = ({ messages, me, isTeamMode, onSendMes
   const teamId = me?.teamId;
   const showTeamTab = isTeamMode && !!teamId;
   const activeTab = showTeamTab ? tab : 'all';
+  const muted = useMutedPlayers();
 
   const visible = messages.filter((m) => {
+    if (muted.has(m.senderId)) return false;
     if (activeTab === 'team') return m.isTeamOnly && m.teamId === teamId;
     return !m.isTeamOnly || (isTeamMode && m.teamId === teamId);
   });
@@ -65,25 +68,53 @@ export const ChatPanel: React.FC<Props> = ({ messages, me, isTeamMode, onSendMes
 
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 py-2 text-[13px]">
         {visible.length === 0 ? (
-          <div className="flex h-full min-h-[80px] flex-col items-center justify-center gap-1.5 text-xs text-slate-500">
+          <div className="flex h-full min-h-[80px] flex-col items-center justify-center gap-1.5 px-2 text-center text-xs text-slate-500">
             <MessageSquare size={18} />
             <span>No messages yet — say hi!</span>
+            <span className="flex items-start gap-1 text-[11px] leading-snug text-slate-500">
+              <ShieldCheck size={12} className="mt-px shrink-0 text-emerald-400/80" aria-hidden="true" />
+              Be kind, and never share personal details like your address, school or phone number. Tap a name to mute that player.
+            </span>
           </div>
         ) : (
           visible.map((m) => {
             const isEmote = EMOTES.includes(m.text);
+            const canMute = m.senderId !== me?.id && m.senderId !== 'system';
             return (
               <div key={m.id} className="break-words leading-snug">
-                <span className="mr-1.5 font-semibold" style={{ color: m.senderColor }}>
-                  {m.senderName}
-                  {m.isTeamOnly && <span className="ml-1 text-[10px] font-bold uppercase text-emerald-400">team</span>}
-                </span>
+                {canMute ? (
+                  <button
+                    type="button"
+                    className="mr-1.5 font-semibold underline-offset-2 hover:underline focus-visible:underline"
+                    style={{ color: m.senderColor }}
+                    onClick={() => setMuted(m.senderId, true)}
+                    title={`Mute ${m.senderName} (hides their chat and voice, just for you)`}
+                  >
+                    {m.senderName}
+                  </button>
+                ) : (
+                  <span className="mr-1.5 font-semibold" style={{ color: m.senderColor }}>
+                    {m.senderName}
+                  </span>
+                )}
+                {m.isTeamOnly && <span className="mr-1.5 text-[10px] font-bold uppercase text-emerald-400">team</span>}
                 <span className={isEmote ? 'text-lg leading-none' : 'text-slate-200'}>{m.text}</span>
               </div>
             );
           })
         )}
       </div>
+
+      {muted.size > 0 && (
+        <div className="flex items-center justify-between gap-2 border-t border-ink-700 px-3 py-1.5 text-[11px] text-slate-400">
+          <span className="flex items-center gap-1">
+            <VolumeX size={12} aria-hidden="true" /> {muted.size === 1 ? '1 player muted' : `${muted.size} players muted`}
+          </span>
+          <button type="button" className="font-semibold text-amber-300 hover:underline" onClick={unmuteAll}>
+            Unmute
+          </button>
+        </div>
+      )}
 
       <form onSubmit={send} className="flex items-center gap-1.5 border-t border-ink-700 p-2">
         <input

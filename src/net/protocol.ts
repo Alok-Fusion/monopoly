@@ -5,7 +5,7 @@ import type { GameAction, GameState, PlayerProfile } from '../types/game';
  * can't drift apart. Bump the version whenever the shape of a message changes: browsers
  * still running an older copy of the game are then asked to refresh.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Room codes: letters and digits only (the game makes 5-character ones). */
 export const ROOM_CODE_RE = /^[A-Z0-9]{4,8}$/;
@@ -19,15 +19,19 @@ export interface VoiceMember {
 }
 
 export type ClientMessage =
-  /** Sit down in the room. `create` makes the room if it doesn't exist yet. */
-  | { type: 'JOIN'; version: number; player: PlayerProfile; seatHint?: string; create?: boolean }
+  /**
+   * Sit down in the room. `create` makes the room if it doesn't exist yet. `seatKey` is the
+   * secret the server gave this device for its seat: without it nobody can take over a seat
+   * whose player is still connected.
+   */
+  | { type: 'JOIN'; version: number; player: PlayerProfile; seatHint?: string; seatKey?: string; create?: boolean }
   | { type: 'ACTION'; action: GameAction }
   | { type: 'VOICE'; inVoice: boolean; muted: boolean; peerId?: string }
   | { type: 'PING' };
 
 export type ServerMessage =
   /** Which seat you're in (it can differ from the id you asked for when you come back from a new tab or device). */
-  | { type: 'WELCOME'; playerId: string }
+  | { type: 'WELCOME'; playerId: string; seatKey: string }
   /** The whole game, plus who may change the rules and the server's clock (for countdowns). */
   | { type: 'STATE'; state: GameState; hostId: string; serverNow: number }
   | { type: 'VOICE_ROSTER'; members: VoiceMember[] }

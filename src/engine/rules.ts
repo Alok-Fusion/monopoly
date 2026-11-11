@@ -1,5 +1,6 @@
 import { GameAction, GameState, PlayerId, PlayerState, TradeOffer } from '../types/game';
 import { getTile, GROUP_TILES, isColorGroup } from './board';
+import { isCount } from './safety';
 import { hasMonopoly } from './rent';
 import { houseCostOf } from './festivals';
 
@@ -154,7 +155,11 @@ export function validateTrade(
   if (!proposer || !target || proposer.bankrupt || target.bankrupt) return 'Invalid trade partner.';
   if (offer.proposerId === offer.targetId) return 'You cannot trade with yourself.';
   const nums = [offer.offerCash, offer.requestCash, offer.offerJailCards, offer.requestJailCards];
-  if (nums.some((n) => !Number.isFinite(n) || n < 0)) return 'Amounts must be positive.';
+  if (nums.some((n) => !isCount(n))) return 'Amounts must be whole numbers, zero or more.';
+  const lists = [offer.offerProperties, offer.requestProperties];
+  if (lists.some((l) => !Array.isArray(l) || l.length > 40 || new Set(l).size !== l.length || !l.every((i) => Number.isInteger(i)))) {
+    return 'That trade lists the same property twice.';
+  }
   if (offer.offerCash > proposer.cash) return `${proposer.name} does not have enough cash.`;
   if (offer.requestCash > target.cash) return `${target.name} does not have enough cash.`;
   if (offer.offerJailCards > proposer.jailCardsCount) return 'Not enough jail cards to offer.';

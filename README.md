@@ -114,6 +114,16 @@ The key stays on the server in [`api/turn.js`](api/turn.js). On other hosts, set
 - `server/` — the game server: `room.ts` (one room: seats, moves, bots, timers), `node.ts` (the Node.js WebSocket server that runs on Render)
 - `src/components/` — board, lobby, sidebars and dialogs
 
+## Safety, privacy and security
+
+- **Policies:** [Privacy](public/privacy.html), [Terms](public/terms.html) and [Safety](public/safety.html), served at `/privacy`, `/terms` and `/safety`, and linked from the cover page and lobby. Online play is for ages 13+ (under 18 with a parent's permission).
+- **Data:** no accounts, cookies, ads or analytics. Rooms live only in the game server's memory and are deleted after everyone leaves.
+- **Player safety:** chat hides links, emails, phone numbers and @handles, filters swear words (English and Hindi), reminds players not to share personal details, and has tap-a-name muting that also silences that player's voice. Players the host removes can't rejoin that room.
+- **Server checks:** every move is checked on the server, and seats are protected by a secret key so nobody can take over another player. Team chat only goes to the team. Messages, chat, connections and rooms are rate-limited, room codes are 7 random characters, and errors in one room can't crash the server.
+- **Website headers:** [`vercel.json`](vercel.json) sends a strict Content Security Policy (no inline code, Trusted Types) and other security headers. Fonts are self-hosted. If the game server's address changes, update `connect-src` there too.
+- **Supply chain:** Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) opens update pull requests, and [`security.yml`](.github/workflows/security.yml) runs CodeQL and `npm audit` on every push.
+- **Reporting:** see [SECURITY.md](SECURITY.md) and [`/.well-known/security.txt`](public/.well-known/security.txt).
+
 ## Credits
 
 Made by **[Alok Kushwaha](https://github.com/Alok-Fusion)**. Landmark photos are from [Unsplash](https://unsplash.com).

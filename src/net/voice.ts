@@ -260,8 +260,14 @@ class VoiceChat {
 
   /** Mute one person for this player only. */
   toggleSilenced(playerId: string) {
+    this.setSilenced(playerId, !this.snapshot.silenced.has(playerId));
+  }
+
+  setSilenced(playerId: string, on: boolean) {
+    if (this.snapshot.silenced.has(playerId) === on) return;
     const silenced = new Set(this.snapshot.silenced);
-    if (!silenced.delete(playerId)) silenced.add(playerId);
+    if (on) silenced.add(playerId);
+    else silenced.delete(playerId);
     this.update({ silenced });
     const member = this.snapshot.members.find((m) => m.playerId === playerId);
     const audio = member && this.calls.get(member.peerId)?.audio;
