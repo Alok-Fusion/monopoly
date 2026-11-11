@@ -14,7 +14,7 @@
     "check": "tsc --noEmit -p ."
   },
   "dependencies": {
-    "esbuild": "^0.25.12",
+    "esbuild": "^0.28.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {
