@@ -9,6 +9,7 @@ import { Brand } from '../common/Brand';
 import { RulesPanel } from '../modals/GameSettingsModal';
 import { inviteLink, REACH_NOTE } from '../../lib/invite';
 import { normalizeRoomCode } from '../../net/peer';
+import { VoiceControl } from '../sidebar/VoiceControl';
 import { nameTaken } from '../../engine/rules';
 
 export type NetRole = 'offline' | 'host' | 'guest';
@@ -352,6 +353,7 @@ export const Lobby: React.FC<Props> = ({
                       </div>
                     </div>
                   )}
+                  <VoiceControl state={state} localPlayerId={localPlayerId} variant="inline" />
                 </div>
               )}
               {netError && (

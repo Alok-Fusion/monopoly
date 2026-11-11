@@ -4,6 +4,8 @@ import { formatINR, formatTeamName, getTeamColor } from '../../lib/format';
 import { calculateNetWorth } from '../../engine/rent';
 import { getCurrentPlayerId, reconnectWaitMs } from '../../engine/rules';
 import { PlayerToken } from '../board/PlayerToken';
+import { Mic, MicOff } from 'lucide-react';
+import { useVoice } from '../../net/voice';
 
 interface Props {
   state: GameState;
@@ -49,6 +51,7 @@ function useCashPops(state: GameState): CashPop[] {
 export const PlayerList: React.FC<Props> = ({ state, localPlayerId, hoveredPlayerId, onHoverPlayer }) => {
   const teamMode = state.settings.mode === 'TEAMS';
   const pops = useCashPops(state);
+  const voiceState = useVoice();
   const currentId = getCurrentPlayerId(state);
 
   const propCount: Record<string, number> = {};
@@ -92,6 +95,8 @@ export const PlayerList: React.FC<Props> = ({ state, localPlayerId, hoveredPlaye
           const isCurrent = pid === currentId && state.phase === 'PLAYING';
           const isMe = pid === localPlayerId;
           const isHovered = pid === hoveredPlayerId;
+          const inVoice = voiceState.members.find((m) => m.playerId === pid);
+          const talking = voiceState.speaking.has(pid);
           return (
             <li
               key={pid}
@@ -108,12 +113,20 @@ export const PlayerList: React.FC<Props> = ({ state, localPlayerId, hoveredPlaye
               }`}
             >
               {isCurrent && <span className="absolute -left-[3px] top-2 bottom-2 w-[3px] rounded-full bg-amber-400" aria-hidden="true" />}
-              <PlayerToken tokenId={p.tokenId} color={p.color} name={p.name} size="sm" dimmed={p.bankrupt} />
+              <span className={`inline-flex shrink-0 rounded-full transition ${talking ? 'ring-2 ring-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.7)]' : ''}`}>
+                <PlayerToken tokenId={p.tokenId} color={p.color} name={p.name} size="sm" dimmed={p.bankrupt} />
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <span className="truncate text-[13px] font-semibold text-white">{p.name}</span>
                   {isMe && <span className="chip bg-amber-400/15 text-amber-300">You</span>}
                   {p.isBot && <span className="chip bg-ink-700 text-slate-300">Bot</span>}
+                  {inVoice &&
+                    (inVoice.muted ? (
+                      <MicOff size={12} className="shrink-0 text-rose-300" aria-label="In voice chat, muted" />
+                    ) : (
+                      <Mic size={12} className={`shrink-0 ${talking ? 'text-emerald-300' : 'text-slate-500'}`} aria-label={talking ? 'Talking' : 'In voice chat'} />
+                    ))}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1">
                   {teamMode && p.teamId && (

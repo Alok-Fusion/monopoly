@@ -20,6 +20,7 @@ import { calculateRent } from './engine/rent';
 import { priceOf } from './engine/festivals';
 import { net, NetStatus, normalizeRoomCode } from './net/peer';
 import { chooseSeat, lastSeatIn, rememberSeat } from './net/seats';
+import { voice, useVoice } from './net/voice';
 import { sounds } from './lib/sound';
 import { formatINR } from './lib/format';
 import { Board } from './components/board/Board';
@@ -32,6 +33,7 @@ import { CoverPage } from './components/cover/CoverPage';
 import { ConfirmModal, Modal } from './components/common/Modal';
 import { Lobby, NetRole } from './components/lobby/Lobby';
 import { RoomCard } from './components/sidebar/LeftSidebar';
+import { VoiceControl } from './components/sidebar/VoiceControl';
 import { RightSidebar } from './components/sidebar/RightSidebar';
 import { ChatPanel } from './components/sidebar/ChatPanel';
 import { BuyPropertyModal } from './components/modals/BuyPropertyModal';
@@ -362,6 +364,37 @@ export const App: React.FC = () => {
     const code = new URLSearchParams(window.location.search).get('room');
     if (code) joinRoom(code);
   }, [joinRoom]);
+
+  /* --------------------------------- voice -------------------------------- */
+
+  const voiceState = useVoice();
+  // Leaving the room (or being turned away) always ends the call and releases the mic
+  useEffect(() => {
+    if (role === 'offline') voice.leave();
+  }, [role]);
+
+  const voiceErrorId = voiceState.error?.id;
+  useEffect(() => {
+    const error = voice.getSnapshot().error;
+    if (!error) return;
+    const id = `voice-${error.id}`;
+    setToasts((all) => [...all.filter((x) => x.id !== id), { id, text: error.message }].slice(-3));
+    setTimeout(() => setToasts((all) => all.filter((x) => x.id !== id)), 7000);
+  }, [voiceErrorId]);
+
+  // M mutes from anywhere, even with a pop-up open (but not while typing)
+  const inVoice = voiceState.status === 'on';
+  useEffect(() => {
+    if (!inVoice) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'm' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+      voice.toggleMute();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [inVoice]);
 
   // Remember our seat so a new tab on this device can sit back down in it
   const seated = role === 'guest' && connected && !!state.players[localPlayerId];
@@ -772,19 +805,29 @@ export const App: React.FC = () => {
               {iconButtons}
             </div>
             <RoomCard roomCode={roomCode} role={role} connected={connected} connectedCount={connectedHumans} />
+            {role !== 'offline' && <VoiceControl state={state} localPlayerId={localPlayerId} />}
             {chat('min-h-0 flex-1')}
           </aside>
 
           {/* Centre: header (below desktop) + board */}
           <div className="flex min-w-0 flex-1 flex-col gap-3">
             <header className="panel flex items-center justify-between gap-2 px-3 py-2 xl:hidden">
-              <Brand size="sm" />
+              <div className="max-[359px]:hidden">
+                <Brand size="sm" />
+              </div>
               {me && !me.bankrupt && (
                 <span className="rounded-full bg-black/30 px-3 py-1 text-sm font-bold tabular-nums text-emerald-300 ring-1 ring-white/10">
                   {formatINR(me.cash)}
                 </span>
               )}
-              {iconButtons}
+              <div className="flex items-center">
+                {role !== 'offline' && (
+                  <div className="lg:hidden">
+                    <VoiceControl state={state} localPlayerId={localPlayerId} variant="compact" />
+                  </div>
+                )}
+                {iconButtons}
+              </div>
             </header>
             <main className="board-wrap flex min-h-0 flex-1 items-center justify-center">
               <Board
@@ -812,6 +855,11 @@ export const App: React.FC = () => {
           {/* Laptop and desktop: right column */}
           <aside className="hidden w-[330px] shrink-0 flex-col gap-3 overflow-y-auto pr-0.5 lg:flex 2xl:w-[350px]">
             <RightSidebar {...sidebarProps} />
+            {role !== 'offline' && (
+              <div className="xl:hidden">
+                <VoiceControl state={state} localPlayerId={localPlayerId} />
+              </div>
+            )}
             {/* Activity lives on the board now; laptops keep chat here */}
             {chat('min-h-[300px] flex-1 xl:hidden')}
           </aside>
@@ -822,6 +870,7 @@ export const App: React.FC = () => {
             {mobileTab === 'players' && (
               <div className="space-y-3">
                 <RightSidebar {...sidebarProps} />
+                {role !== 'offline' && <VoiceControl state={state} localPlayerId={localPlayerId} />}
                 {role !== 'offline' && <RoomCard roomCode={roomCode} role={role} connected={connected} connectedCount={connectedHumans} />}
               </div>
             )}
@@ -1067,7 +1116,7 @@ export const App: React.FC = () => {
             role="status"
             className="panel pointer-events-auto flex w-full max-w-sm items-center gap-3 border-amber-300/40 px-3 py-2.5 text-[13px] shadow-2xl animate-pop-in"
           >
-            <span className="text-lg">🤝</span>
+            <span className="text-lg">{t.tradeId ? '🤝' : '🎙️'}</span>
             <span className="min-w-0 flex-1 text-slate-100">{t.text}</span>
             {t.tradeId && (
               <button

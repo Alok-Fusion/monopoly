@@ -14,6 +14,7 @@ An Indian-themed property-trading board game that runs entirely in the browser. 
 - **Teams of two** — partners pay no rent to each other, share colour sets and inherit each other's assets.
 - **Bots** — easy, normal and tough. If a player drops out mid-game, the game waits 60 seconds for them to come back before autopilot plays their turns (the host can tap **Play for them** to skip the wait).
 - **Online rooms** — PeerJS/WebRTC. The host's browser runs the game and validates every action from guests. Every player in a room has their own name and colour.
+- **Voice chat** — join the call from the lobby or during the game. Mute yourself (or press **M**), mute one person just for you, and see who's talking. Your mic stays off until you join.
 - **Game length** — Quick (20 rounds), Standard (30), Long (45) or Endless. With a limit, the richest player (cash + property value) wins when time runs out, so games always finish.
 - **Festivals** — every third round a festival bends one rule for that round: Diwali Dhamaka (half-price houses), Monsoon Season (double utility rent), IPL Fever (double railway rent), Shaadi Season (double rent on one colour set), Startup Boom (double salary), Income Tax Raid (double tax), Bharat Bandh (no rent anywhere) and the Great Indian Sale (25% off unowned property). The board announces how many rounds until the next one.
 - **Bots that make deals** — when a bot is one property away from a full set, it offers to buy the missing piece (tough bots pay more and drive a harder bargain when selling).
@@ -49,13 +50,20 @@ npm run preview
 
 - **Same Wi-Fi:** when you host from `localhost`, the invite link automatically uses your computer's network address (e.g. `http://192.168.0.109:3000/?room=AB3CD`), so friends on the same Wi-Fi can open it. The first time, Windows may ask to allow Node.js through the firewall — allow it on private networks.
 - **Over the internet:** run `npm run build` and upload the `dist/` folder to any static host (Netlify, Vercel, GitHub Pages…). Invite links then use that public address.
-- **Phones on mobile data / strict networks:** if players can't connect directly, add a TURN relay in a `.env` file:
+- **Phones on mobile data / strict networks:** these block direct connections, so players need a TURN relay. See below.
 
-  ```
-  VITE_TURN_URL=turn:your-turn-server:3478
-  VITE_TURN_USERNAME=...
-  VITE_TURN_CREDENTIAL=...
-  ```
+**Setting up the relay (recommended once the game is online)**
+
+If players see *"one of your networks is blocking direct connections"* (or `ICE failed, add a TURN server` in the browser console), the game needs a relay. On Vercel:
+
+1. Create a free account at [Metered](https://dashboard.metered.ca/signup?tool=turnserver) (free tier: 20 GB of relay traffic a month).
+2. Copy your credentials address. It looks like `https://yourapp.metered.live/api/v1/turn/credentials?apiKey=YOUR_KEY`.
+3. In Vercel, open your project → **Settings** → **Environment Variables**, and add `TURN_CREDENTIALS_URL` with that address.
+4. Redeploy. To check it, open `https://your-site/api/turn`: you should see a list of servers rather than an error.
+
+The key stays on the server, in [`api/turn.js`](api/turn.js). Traffic only uses the relay when a direct connection isn't possible, and it stays encrypted between players. On other hosts, set `VITE_TURN_URL`, `VITE_TURN_USERNAME` and `VITE_TURN_CREDENTIAL` when building instead.
+
+**Voice chat** needs the game to be on an `https://` address (a plain `http://192.168…` link can't use the microphone).
 
 **Staying connected**
 

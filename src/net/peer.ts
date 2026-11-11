@@ -1,4 +1,4 @@
-import { Peer, DataConnection, PeerOptions } from 'peerjs';
+import { Peer, DataConnection, MediaConnection, PeerOptions } from 'peerjs';
 import { GameAction, GameState, PlayerProfile } from '../types/game';
 import { Assembler, toFrames } from './frames';
 
@@ -11,7 +11,18 @@ export type NetMessage =
   | { type: 'SEAT'; playerId: string }
   | { type: 'JOIN_REJECTED'; reason: string }
   | { type: 'PING' }
-  | { type: 'PONG' };
+  | { type: 'PONG' }
+  /** Guest to host: I joined / left voice, or changed my mute. */
+  | { type: 'VOICE_STATE'; inVoice: boolean; muted: boolean }
+  /** Host to guests: everyone currently in the voice call. */
+  | { type: 'VOICE_ROSTER'; members: VoiceMember[] };
+
+/** Someone in the voice call. `peerId` always comes from their real connection, never from what they claim. */
+export interface VoiceMember {
+  playerId: string;
+  peerId: string;
+  muted: boolean;
+}
 
 /** 'connecting' = first join / creating a room; 'reconnecting' = was in, lost the link, trying again. */
 export type NetStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
@@ -52,28 +63,57 @@ function send(conn: DataConnection | null | undefined, msg: NetMessage): boolean
 }
 
 /**
- * STUN lets two browsers find a direct route to each other; it works for most
- * home Wi-Fi. Phones on mobile data or strict office networks often also need a
- * TURN relay — set VITE_TURN_URL / VITE_TURN_USERNAME / VITE_TURN_CREDENTIAL in a
- * .env file to add one.
+ * STUN finds a direct route between two browsers, which works on most home Wi-Fi. Mobile
+ * data and strict networks block that, so they need a TURN relay. Relay details come from
+ * /api/turn (see README), or from VITE_TURN_URL / _USERNAME / _CREDENTIAL at build time.
+ * The list is kept short because browsers slow down with five or more servers.
  */
-function iceServers(): RTCIceServer[] {
-  const servers: RTCIceServer[] = [
-    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-    { urls: 'stun:global.stun.twilio.com:3478' },
-  ];
+const STUN_SERVER: RTCIceServer = { urls: 'stun:stun.l.google.com:19302' };
+const RELAY_FETCH_MS = 3000;
+const RELAY_CACHE_MS = 10 * 60_000;
+let relayCache: { at: number; servers: RTCIceServer[] } | null = null;
+
+function builtInRelay(): RTCIceServer[] {
   const env = import.meta.env;
-  if (env.VITE_TURN_URL) {
-    servers.push({
+  if (!env.VITE_TURN_URL) return [];
+  return [
+    {
       urls: String(env.VITE_TURN_URL).split(',').map((u) => u.trim()),
       username: env.VITE_TURN_USERNAME ? String(env.VITE_TURN_USERNAME) : undefined,
       credential: env.VITE_TURN_CREDENTIAL ? String(env.VITE_TURN_CREDENTIAL) : undefined,
-    });
-  }
-  return servers;
+    },
+  ];
 }
 
-const PEER_OPTIONS: PeerOptions = { debug: 1, config: { iceServers: iceServers() } };
+/** Never throws or hangs: with no relay available the game still tries a direct connection. */
+async function fetchRelay(): Promise<RTCIceServer[]> {
+  if (relayCache && Date.now() - relayCache.at < RELAY_CACHE_MS) return relayCache.servers;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), RELAY_FETCH_MS);
+  try {
+    const res = await fetch('/api/turn', { signal: abort.signal });
+    if (!res.ok) return [];
+    const body = (await res.json()) as unknown;
+    if (!Array.isArray(body)) return [];
+    const servers = (body as RTCIceServer[]).filter((x) => !!x && (typeof x.urls === 'string' || Array.isArray(x.urls)));
+    if (servers.length) relayCache = { at: Date.now(), servers };
+    return servers;
+  } catch {
+    return []; // no such function here (local dev, other hosts), or it didn't answer in time
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function peerOptions(): Promise<PeerOptions> {
+  const relay = [...(await fetchRelay()), ...builtInRelay()];
+  // Relay providers usually include their own STUN server
+  const hasStun = relay.some((x) => [x.urls].flat().some((u) => u.startsWith('stun:')));
+  return { debug: 1, config: { iceServers: hasStun ? relay : [STUN_SERVER, ...relay] } };
+}
+
+const NETWORK_BLOCKED =
+  "Couldn't connect to the host's device: one of your networks is blocking direct connections. Try a different Wi-Fi or mobile data, or ask the host to set up a relay.";
 
 function describePeerError(err: { type?: string; message?: string }, role: 'host' | 'guest'): string {
   switch (err.type) {
@@ -132,6 +172,7 @@ export class NetworkManager {
   private hostHeartbeat: ReturnType<typeof setInterval> | null = null;
   private pendingState: GameState | null = null;
   private broadcastTimer: ReturnType<typeof setTimeout> | null = null;
+  private voiceMembers = new Map<string, VoiceMember>();
 
   // Guest side
   private join: JoinIntent | null = null;
@@ -148,10 +189,15 @@ export class NetworkManager {
   public onSeatAssigned?: (playerId: string) => void;
   public onJoinRejected?: (reason: string) => void;
   public onStatus?: (status: NetStatus, message?: string) => void;
+  public onVoiceRoster?: (members: VoiceMember[]) => void;
+  public onIncomingCall?: (call: MediaConnection) => void;
+  /** The link to the room is up (first time, or again after a reconnect). */
+  public onLinkReady?: () => void;
 
   private setStatus(status: NetStatus, message?: string) {
     this.status = status;
     this.onStatus?.(status, message);
+    if (status === 'connected') this.onLinkReady?.();
   }
 
   /** Keep the link to the matchmaking server alive so new guests can still find the room. */
@@ -171,9 +217,15 @@ export class NetworkManager {
     const gen = this.generation;
     const alive = () => gen === this.generation;
     this.setStatus('connecting');
+    void peerOptions().then((options) => {
+      if (alive()) this.openRoom(roomCode, options, gen, onReady, onError);
+    });
+  }
 
+  private openRoom(roomCode: string, options: PeerOptions, gen: number, onReady: (roomCode: string) => void, onError: (err: string) => void) {
+    const alive = () => gen === this.generation;
     try {
-      const peer = new Peer(`${PEER_PREFIX}${roomCode.toLowerCase()}`, PEER_OPTIONS);
+      const peer = new Peer(`${PEER_PREFIX}${roomCode.toLowerCase()}`, options);
       this.peer = peer;
       this.keepSignalling(peer);
       let ready = false;
@@ -187,6 +239,7 @@ export class NetworkManager {
         this.setStatus('connected');
       });
       peer.on('connection', (conn) => alive() && this.acceptGuestConnection(conn));
+      peer.on('call', (call) => alive() && this.onIncomingCall?.(call));
       peer.on('error', (err) => {
         if (!alive()) return;
         console.warn('PeerJS host error:', err);
@@ -224,6 +277,9 @@ export class NetworkManager {
           // Only trust the player id this connection was seated as
           if (link.playerId && link.playerId === msg.senderId) this.onActionReceived?.(msg.action, msg.senderId);
           return;
+        case 'VOICE_STATE':
+          if (link.playerId) this.updateVoice(link.playerId, conn.peer, msg.inVoice, msg.muted);
+          return;
         default:
           return;
       }
@@ -255,6 +311,13 @@ export class NetworkManager {
             setTimeout(() => g.conn.close(), 500);
           }
         });
+        // Their old connection's place in the call is gone; they re-announce from this one
+        const stale = this.voiceMembers.get(playerId);
+        if (stale && stale.peerId !== link.conn.peer) {
+          this.voiceMembers.delete(playerId);
+          this.publishVoice();
+        }
+        send(link.conn, { type: 'VOICE_ROSTER', members: [...this.voiceMembers.values()] });
       },
       reply: (state) => send(link.conn, { type: 'STATE_SYNC', state }),
       reject: (reason) => {
@@ -271,7 +334,10 @@ export class NetworkManager {
     this.guests.delete(key);
     const playerId = link.playerId;
     const stillHere = !!playerId && [...this.guests.values()].some((g) => g.playerId === playerId);
-    if (playerId && !stillHere) this.onPlayerLeft?.(playerId);
+    if (playerId && !stillHere) {
+      if (this.voiceMembers.delete(playerId)) this.publishVoice();
+      this.onPlayerLeft?.(playerId);
+    }
   }
 
   private startHostHeartbeat(gen: number) {
@@ -298,6 +364,7 @@ export class NetworkManager {
       this.guests.delete(key);
       setTimeout(() => link.conn.close(), 500);
     });
+    if (this.voiceMembers.delete(playerId)) this.publishVoice();
   }
 
   /** Sends the latest state to every seated guest (several quick changes go out as one). */
@@ -313,6 +380,49 @@ export class NetworkManager {
       const msg: NetMessage = { type: 'STATE_SYNC', state: latest };
       this.guests.forEach((link) => link.playerId && send(link.conn, msg));
     }, 30);
+  }
+
+  /* -------------------------------- voice ------------------------------- */
+
+  private publishVoice() {
+    const members = [...this.voiceMembers.values()];
+    this.onVoiceRoster?.(members);
+    this.guests.forEach((link) => link.playerId && send(link.conn, { type: 'VOICE_ROSTER', members }));
+  }
+
+  private updateVoice(playerId: string, peerId: string, inVoice: boolean, muted: boolean) {
+    const before = this.voiceMembers.get(playerId);
+    if (inVoice) {
+      if (before && before.peerId === peerId && before.muted === muted) return;
+      this.voiceMembers.set(playerId, { playerId, peerId, muted });
+    } else if (!this.voiceMembers.delete(playerId)) {
+      return;
+    }
+    this.publishVoice();
+  }
+
+  /** Tell the room whether we're in the call. */
+  public setVoiceState(playerId: string, inVoice: boolean, muted: boolean) {
+    if (!this.isHost) {
+      send(this.hostConn, { type: 'VOICE_STATE', inVoice, muted });
+      return;
+    }
+    if (this.peer?.id) this.updateVoice(playerId, this.peer.id, inVoice, muted);
+  }
+
+  /** This browser's id on the matchmaking server. */
+  public get localPeerId(): string | null {
+    return this.peer && !this.peer.destroyed ? this.peer.id ?? null : null;
+  }
+
+  /** Whether calls can be placed right now (matchmaking server reachable, room link up). */
+  public get canCall(): boolean {
+    return this.status === 'connected' && !!this.peer && !this.peer.destroyed && !this.peer.disconnected;
+  }
+
+  public callPeer(peerId: string, stream: MediaStream): MediaConnection | null {
+    if (!this.canCall) return null;
+    return this.peer!.call(peerId, stream) ?? null;
   }
 
   /* -------------------------------- guest ------------------------------- */
@@ -352,13 +462,23 @@ export class NetworkManager {
     this.setStatus(join.joined ? 'reconnecting' : 'connecting');
 
     this.attemptTimer = setTimeout(() => {
-      if (alive()) this.attemptFailed("Couldn't reach the room. Make sure the host still has the game open, and that you're on their invite link.");
+      if (!alive()) return;
+      // The host answered through the matchmaking server, but no direct route ever opened
+      if (this.hostConn && !this.hostConn.open) this.attemptFailed(NETWORK_BLOCKED);
+      else this.attemptFailed("Couldn't reach the room. Make sure the host still has the game open, and that you're on their invite link.");
     }, ATTEMPT_TIMEOUT_MS);
 
+    void peerOptions().then((options) => {
+      if (alive()) this.openGuestPeer(join, options, gen, alive);
+    });
+  }
+
+  private openGuestPeer(join: JoinIntent, options: PeerOptions, gen: number, alive: () => boolean) {
     try {
-      const peer = new Peer(PEER_OPTIONS);
+      const peer = new Peer(options);
       this.peer = peer;
       this.keepSignalling(peer);
+      peer.on('call', (call) => alive() && this.onIncomingCall?.(call));
       peer.on('open', () => {
         if (!alive() || this.hostConn) return; // re-registered with the matchmaking server; the game link is separate
         const conn = peer.connect(`${PEER_PREFIX}${join.roomCode.toLowerCase()}`, { reliable: true, serialization: 'json' });
@@ -376,7 +496,10 @@ export class NetworkManager {
           const msg = assembler.take(data) as NetMessage | null;
           if (msg) this.handleHostMessage(msg, conn, join);
         });
-        conn.on('error', (err) => console.warn('Bazaar: host connection error', err));
+        conn.on('error', (err) => {
+          console.warn('Bazaar: host connection error', err);
+          if (alive() && (err as { type?: string }).type === 'negotiation-failed') this.attemptFailed(NETWORK_BLOCKED);
+        });
         conn.on('close', () => alive() && this.hostLost());
       });
       peer.on('error', (err) => {
@@ -415,6 +538,9 @@ export class NetworkManager {
         this.onStateSync?.(msg.state);
         return;
       }
+      case 'VOICE_ROSTER':
+        this.onVoiceRoster?.(msg.members);
+        return;
       case 'JOIN_REJECTED': {
         const reason = msg.reason;
         this.cleanup();
@@ -499,6 +625,8 @@ export class NetworkManager {
     if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
     this.hostHeartbeat = this.broadcastTimer = null;
     this.pendingState = null;
+    this.voiceMembers.clear();
+    this.onVoiceRoster?.([]);
     const guests = [...this.guests.values()];
     this.guests.clear();
     guests.forEach((g) => g.conn.close());
