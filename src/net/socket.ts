@@ -1,6 +1,7 @@
 import type { GameAction, GameState, PlayerProfile } from '../types/game';
 import { PROTOCOL_VERSION, type ClientMessage, type ServerMessage, type VoiceMember } from './protocol';
 import { rememberSeat, seatKeyIn } from '../lib/lastSeat';
+import { checkServer, markServerReady } from './serverStatus';
 
 /**
  * The game's link to the Bazaar game server (one WebSocket). Every player connects out
@@ -28,9 +29,9 @@ const WAKE_RETRY_MS = 3000;
 
 const UNREACHABLE = "Couldn't reach the game server. Check your internet connection and try again.";
 
-/** A plain web request wakes a sleeping server sooner than waiting on the WebSocket. */
+/** A plain web request wakes a sleeping server sooner than waiting on the WebSocket, and tells us whether it was asleep. */
 function wakeServer(url: string) {
-  void fetch(`${url.replace(/^ws/, 'http')}/health`, { mode: 'no-cors', cache: 'no-store' }).catch(() => undefined);
+  void checkServer(url);
 }
 
 /** Where the game server lives: VITE_GAME_SERVER_URL, or a local server while developing. */
@@ -216,6 +217,7 @@ export class NetworkManager {
           s.joined = true;
           s.lostAt = 0;
           s.retries = 0;
+          markServerReady();
           this.setStatus('connected');
           if (first) s.onJoined();
         }

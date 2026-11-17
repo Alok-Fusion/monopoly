@@ -77,20 +77,24 @@ The frontend stays on Vercel; the game server goes on [Render](https://render.co
 
 Things to know about Render's free plan:
 
-- After 15 minutes with nobody playing, the server sleeps. The next person to create or join a room waits about a minute while it wakes up; the game shows "Starting the game server" and keeps trying for 90 seconds.
+- After 15 minutes with nobody playing, the server sleeps, and waking it takes from about 10 seconds to a minute. The game starts waking it the moment someone opens the site, and the lobby shows a live counter and progress bar ("Waking the game server · 18s") so players can set up their player instead of staring at a frozen button. Joining keeps trying for 90 seconds.
 - While anyone is playing, the server stays awake.
 - If the server restarts or you redeploy, games in progress are lost (the free plan has no saved storage). Redeploy between games.
 - 750 free hours a month, enough to keep one server running all month.
 
 **Keeping the server awake all the time (optional)**
 
-The site already pings the server whenever someone has it open. To keep it awake even when nobody does, [`.github/workflows/keep-server-awake.yml`](.github/workflows/keep-server-awake.yml) pings it every 5 minutes from GitHub:
+The site already pings the server whenever someone has it open. To keep it awake when nobody does, something outside has to ping `/health` at least every 14 minutes.
+
+The reliable free way is an uptime monitor: create a free account at [cron-job.org](https://cron-job.org) (every minute) or [UptimeRobot](https://uptimerobot.com) (every 5 minutes) and point it at `https://<your-render-address>/health`.
+
+[`.github/workflows/keep-server-awake.yml`](.github/workflows/keep-server-awake.yml) is a backup that asks GitHub to ping every 5 minutes. **GitHub throttles scheduled jobs heavily**: in its first week this one ran 23 times in 6 days, roughly every 6 hours, so on its own it does not keep the server awake. To set it up:
 
 1. Make the repository public (GitHub Actions minutes are free and unlimited for public repositories).
 2. In GitHub, open **Settings** → **Secrets and variables** → **Actions** → **Variables** and add `GAME_SERVER_URL` with your Render address.
 3. Merge the workflow into `main` (GitHub only runs schedules from the default branch). To test it, open the **Actions** tab → **Keep game server awake** → **Run workflow**.
 
-This uses about 744 of Render's 750 free hours a month. GitHub may delay scheduled runs when it's busy, and it pauses them after 60 days without commits; re-enable from the Actions tab.
+Staying awake all month uses about 744 of Render's 750 free hours. GitHub pauses schedules after 60 days without commits; re-enable from the Actions tab. The only way to get rid of cold starts entirely is Render's paid plan.
 
 **Voice chat** sends audio directly between players, not through the game server. It needs the game on an `https://` address, and players on different networks usually need a TURN relay:
 

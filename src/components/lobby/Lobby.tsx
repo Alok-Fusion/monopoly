@@ -7,6 +7,7 @@ import { formatTeamName, getTeamColor } from '../../lib/format';
 import { MAX_PLAYERS_CAP } from '../../engine/state';
 import { Brand } from '../common/Brand';
 import { Credit } from '../common/Credit';
+import { ServerWake } from './ServerWake';
 import { RulesPanel } from '../modals/GameSettingsModal';
 import { inviteLink, REACH_NOTE } from '../../lib/invite';
 import { normalizeRoomCode } from '../../net/socket';
@@ -329,12 +330,7 @@ export const Lobby: React.FC<Props> = ({
                     </a>
                     .
                   </p>
-                  {connecting && serverWaking && (
-                    <p className="flex items-center gap-2 rounded-lg bg-amber-400/10 px-3 py-2 text-xs text-amber-100 ring-1 ring-amber-300/30" role="status">
-                      <span className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-amber-200/30 border-t-amber-300" aria-hidden="true" />
-                      Starting the game server. After a quiet spell this can take up to a minute.
-                    </p>
-                  )}
+                  <ServerWake connecting={connecting} waking={serverWaking} />
                   {connecting && joiningCode && (
                     <p className="flex items-center gap-2 rounded-lg bg-black/25 px-3 py-2 text-xs text-slate-300 ring-1 ring-white/5" role="status">
                       <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/20 border-t-amber-300" aria-hidden="true" />

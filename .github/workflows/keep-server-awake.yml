@@ -5,8 +5,10 @@
 #   Name:  GAME_SERVER_URL
 #   Value: your Render address, e.g. https://bazaar-server.onrender.com
 #
-# Notes: GitHub only runs schedules from the default branch (main), may delay runs when
-# it's busy, and pauses schedules after 60 days without any commits to the repository.
+# Notes: GitHub only runs schedules from the default branch (main) and pauses them after
+# 60 days without commits. It also throttles schedules heavily: in practice this ran about
+# every 6 hours, not every 5 minutes. Treat it as a backup and use a free uptime monitor
+# (cron-job.org or UptimeRobot) pinging /health as the main keep-awake. See the README.
 name: Keep game server awake
 
 on:
