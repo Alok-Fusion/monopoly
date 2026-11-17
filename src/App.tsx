@@ -18,6 +18,8 @@ import {
 import { calculateRent } from './engine/rent';
 import { priceOf } from './engine/festivals';
 import { net, NetStatus, normalizeRoomCode, warmUpServer } from './net/socket';
+import { bestRoom, fetchPublicRooms } from './net/publicRooms';
+import type { PublicRoom } from './net/protocol';
 import { lastSeatIn, rememberSeat } from './lib/lastSeat';
 import { voice, useVoice } from './net/voice';
 import { sounds } from './lib/sound';
@@ -315,11 +317,13 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  const createRoom = () => {
+  /** Makes a room with this player as host. Public rooms show in everyone's "Public rooms" list. */
+  const createRoom = (publicRoom = false) => {
     const code = makeRoomCode();
     setNetError(null);
     setJoiningCode(null);
     net.createRoom(code, { ...profileRef.current, id: localIdRef.current }, {
+      publicRoom,
       onJoined: () => {
         setRoomCode(code);
         // A refresh brings the host straight back into their room
@@ -347,6 +351,28 @@ export const App: React.FC = () => {
       onError: (err) => setNetError(err),
     });
   }, []);
+
+  /**
+   * For a player with nobody to play with: join the public room with the most people
+   * waiting, or open a new public room (as host) for the next solo player to find.
+   */
+  const [findingGame, setFindingGame] = useState(false);
+  const findGame = async () => {
+    if (findingGame || net.status === 'connecting') return;
+    setFindingGame(true);
+    setNetError(null);
+    warmUpServer();
+    let pick: PublicRoom | undefined;
+    try {
+      // A sleeping server can take a while to answer the first time
+      pick = bestRoom(await fetchPublicRooms(70_000));
+    } catch {
+      pick = undefined; // couldn't see the list: open a public room instead
+    }
+    setFindingGame(false);
+    if (pick) joinRoom(pick.code);
+    else createRoom(true);
+  };
 
   // Auto-join from an invite link (?room=CODE) — once, even under StrictMode
   const autoJoined = useRef(false);
@@ -784,8 +810,10 @@ export const App: React.FC = () => {
           onUpdateSettings={(settings) => dispatch({ type: 'UPDATE_SETTINGS', settings })}
           onOpenSettings={() => setIsSettingsOpen(true)}
           onStartGame={() => dispatch({ type: 'START_GAME' })}
-          onCreateRoom={createRoom}
+          onCreateRoom={() => createRoom(false)}
           onJoinRoom={joinRoom}
+          onFindGame={findGame}
+          findingGame={findingGame}
           onLeaveRoom={leaveRoom}
           savedGame={role === 'offline' && savedGame ? { round: savedGame.state.round ?? 1, savedAt: savedGame.savedAt, players: savedGame.state.playerOrder.map((id) => savedGame.state.players[id]!).filter(Boolean) } : null}
           onResumeSaved={resumeSavedGame}

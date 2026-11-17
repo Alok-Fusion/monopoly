@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Copy, Check, QrCode, Dice5, LogOut, X, Wifi, Play, Users, Swords, Bot, Sparkles } from 'lucide-react';
+import { Copy, Check, QrCode, Dice5, LogOut, X, Wifi, Play, Users, Swords, Bot, Sparkles, Globe2 } from 'lucide-react';
 import { GameState, TokenId, TeamId, BotDifficulty, PlayerId, PlayerProfile, PlayerState } from '../../types/game';
 import { TOKEN_EMOJIS, PlayerToken } from '../board/PlayerToken';
 import { formatTeamName, getTeamColor } from '../../lib/format';
@@ -8,6 +8,7 @@ import { MAX_PLAYERS_CAP } from '../../engine/state';
 import { Brand } from '../common/Brand';
 import { Credit } from '../common/Credit';
 import { ServerWake } from './ServerWake';
+import { PublicRooms } from './PublicRooms';
 import { RulesPanel } from '../modals/GameSettingsModal';
 import { inviteLink, REACH_NOTE } from '../../lib/invite';
 import { normalizeRoomCode } from '../../net/socket';
@@ -40,6 +41,9 @@ interface Props {
   onStartGame: () => void;
   onCreateRoom: () => void;
   onJoinRoom: (code: string) => void;
+  /** Join an open public room, or open one, for players with nobody to play with. */
+  onFindGame: () => void;
+  findingGame: boolean;
   onLeaveRoom: () => void;
   savedGame: { round: number; savedAt: number; players: PlayerState[] } | null;
   onResumeSaved: () => void;
@@ -104,6 +108,8 @@ export const Lobby: React.FC<Props> = ({
   onStartGame,
   onCreateRoom,
   onJoinRoom,
+  onFindGame,
+  findingGame,
   onLeaveRoom,
   savedGame,
   onResumeSaved,
@@ -287,13 +293,23 @@ export const Lobby: React.FC<Props> = ({
               </div>
             </Card>
 
-            <Card title={<><Wifi size={13} /> Play with friends</>}>
+            <Card title={<><Wifi size={13} /> Play online</>}>
               {role === 'offline' ? (
                 <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <button type="button" className="btn btn-primary w-full" onClick={onFindGame} disabled={connecting || findingGame}>
+                      <Globe2 size={15} /> {findingGame ? 'Finding a game…' : 'Find a game'}
+                    </button>
+                    <p className="text-[11px] leading-snug text-slate-400">No one to play with? Join a public room, or open one for the next player to find.</p>
+                  </div>
+                  <PublicRooms onJoin={onJoinRoom} disabled={connecting || findingGame} />
+                  <div className="flex items-center gap-2 pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    <span className="h-px flex-1 bg-white/10" /> Or play with friends <span className="h-px flex-1 bg-white/10" />
+                  </div>
                   <p className="text-xs leading-relaxed text-slate-400">
-                    Create a room and share the link. Friends can join from anywhere, and the game keeps going even if someone's connection drops.
+                    Create a private room and share the link. Friends can join from anywhere, and the game keeps going even if someone's connection drops.
                   </p>
-                  <button type="button" className="btn btn-secondary w-full" onClick={onCreateRoom} disabled={connecting}>
+                  <button type="button" className="btn btn-secondary w-full" onClick={onCreateRoom} disabled={connecting || findingGame}>
                     {connecting && !joiningCode ? 'Creating room…' : 'Create online room'}
                   </button>
                   <form
@@ -349,6 +365,29 @@ export const Lobby: React.FC<Props> = ({
                       {connected ? (role === 'host' ? 'Hosting' : 'Connected') : 'Connecting…'}
                     </span>
                   </div>
+                  {state.phase === 'LOBBY' &&
+                    (isHost ? (
+                      <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-black/25 px-3 py-2.5 ring-1 ring-white/5">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-amber-400"
+                          checked={!state.settings.privateRoom}
+                          onChange={(e) => onUpdateSettings({ privateRoom: !e.target.checked })}
+                        />
+                        <span>
+                          <span className="block text-[13px] font-semibold text-white">List in public rooms</span>
+                          <span className="block text-[11px] leading-snug text-slate-400">
+                            {state.settings.privateRoom ? 'Off: only people with your link can join.' : 'On: anyone looking for a game can find and join this room.'}
+                          </span>
+                        </span>
+                      </label>
+                    ) : (
+                      !state.settings.privateRoom && (
+                        <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                          <Globe2 size={12} aria-hidden="true" /> Public room: anyone looking for a game can join.
+                        </p>
+                      )
+                    ))}
                   <div className="flex gap-2">
                     <button type="button" className="btn btn-secondary flex-1" onClick={copyInvite}>
                       {copied ? <Check size={15} /> : <Copy size={15} />} {copied ? 'Link copied' : 'Copy invite'}

@@ -61,6 +61,8 @@ interface Session {
   code: string;
   player: PlayerProfile;
   create: boolean;
+  /** With create: list the new room publicly. */
+  publicRoom?: boolean;
   seatHint?: string;
   /** The server's secret for our seat (proves a reconnect is really us). */
   seatKey?: string;
@@ -105,7 +107,7 @@ export class NetworkManager {
     if (status === 'connected') this.onLinkReady?.();
   }
 
-  public createRoom(code: string, player: PlayerProfile, cb: { onJoined: () => void; onError: (message: string) => void }) {
+  public createRoom(code: string, player: PlayerProfile, cb: { onJoined: () => void; onError: (message: string) => void; publicRoom?: boolean }) {
     this.start({ code, player, create: true, joined: false, startedAt: Date.now(), lostAt: 0, retries: 0, ...cb });
   }
 
@@ -169,7 +171,7 @@ export class NetworkManager {
 
     ws.onopen = () => {
       if (!alive()) return;
-      this.send({ type: 'JOIN', version: PROTOCOL_VERSION, player: s.player, seatHint: s.seatHint, seatKey: s.seatKey ?? seatKeyIn(s.code), create: s.create });
+      this.send({ type: 'JOIN', version: PROTOCOL_VERSION, player: s.player, seatHint: s.seatHint, seatKey: s.seatKey ?? seatKeyIn(s.code), create: s.create, publicRoom: s.create ? !!s.publicRoom : undefined });
       this.heartbeat = setInterval(() => alive() && this.beat(), HEARTBEAT_MS);
     };
     ws.onmessage = (event) => {

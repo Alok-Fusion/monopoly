@@ -3,7 +3,7 @@ import { getBotNextAction } from '../src/engine/bots';
 import { actorOfAction, decisionOwner, decisionTimeLimitMs, getCurrentPlayerId, isAutomated, openTrades, reconnectWaitMs } from '../src/engine/rules';
 import { chooseSeat } from '../src/net/seats';
 import { PROTOCOL_VERSION } from '../src/net/protocol';
-import type { ClientMessage, ServerMessage, VoiceMember } from '../src/net/protocol';
+import type { ClientMessage, PublicRoom, ServerMessage, VoiceMember } from '../src/net/protocol';
 import type { DecisionKind } from '../src/engine/rules';
 import { cleanName, isHexColor, isTeamId, isTokenId } from '../src/engine/safety';
 import type { GameAction, GameState, PlayerId, PlayerProfile } from '../src/types/game';
@@ -109,6 +109,8 @@ export class Room {
   private voice = new Map<PlayerId, VoiceMember>();
   /** Each seat's secret. Never part of the game state, so other players never see it. */
   private seatKeys = new Map<PlayerId, string>();
+  /** When the room was made (for "waiting 2 min" in the public list). */
+  private openedAt = 0;
   /** Players the host removed (their ids and addresses): they can't come back to this room. */
   private banned = new Set<string>();
   /** Until when players' screens are still animating the last move. */
@@ -150,6 +152,30 @@ export class Room {
   /** Someone actually created a game here (not just a visit to a code that doesn't exist). */
   get hasGame() {
     return this.state !== null;
+  }
+
+  /**
+   * How this room shows in the public list, or null if it isn't listed: private rooms,
+   * games already under way, full rooms, and rooms whose host has gone are all left out.
+   */
+  listing(): PublicRoom | null {
+    const s = this.state;
+    if (!s || s.phase !== 'LOBBY' || s.settings.privateRoom) return null;
+    if (!this.livePlayers().has(this.hostId)) return null;
+    const players = s.playerOrder.length;
+    const maxPlayers = Math.min(s.settings.maxPlayers, 8);
+    if (players >= maxPlayers) return null;
+    const humans = s.playerOrder.filter((id) => s.players[id] && !s.players[id]!.isBot).length;
+    return {
+      code: this.code,
+      host: s.players[this.hostId]?.name ?? 'Host',
+      humans,
+      players,
+      maxPlayers,
+      mode: s.settings.mode,
+      roundLimit: s.settings.roundLimit,
+      waitingFor: Math.max(0, Math.round((this.clock.now() - this.openedAt) / 1000)),
+    };
   }
 
   /** The game has got past the lobby. */
@@ -266,7 +292,18 @@ export class Room {
 
     if (!this.state) {
       if (!msg.create) return this.refuse(client, ROOM_NOT_FOUND);
-      this.state = gameReducer(createInitialState(player), { type: 'SET_ROOM', roomCode: this.code, isHost: true });
+      let created = gameReducer(createInitialState(player), { type: 'SET_ROOM', roomCode: this.code, isHost: true });
+      // Rooms are invite-only unless the creator asks for a public one. A public room
+      // starts without the sample bot, so the seats are free for people who find it.
+      const listed = msg.publicRoom === true;
+      created = { ...created, settings: { ...created.settings, privateRoom: !listed } };
+      if (listed) {
+        created.playerOrder
+          .filter((id) => created.players[id]?.isBot)
+          .forEach((id) => (created = gameReducer(created, { type: 'REMOVE_PLAYER', playerId: id })));
+      }
+      this.state = created;
+      this.openedAt = this.clock.now();
       this.hostId = player.id;
       this.sit(client, player.id, false);
       return;

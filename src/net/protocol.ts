@@ -22,9 +22,10 @@ export type ClientMessage =
   /**
    * Sit down in the room. `create` makes the room if it doesn't exist yet. `seatKey` is the
    * secret the server gave this device for its seat: without it nobody can take over a seat
-   * whose player is still connected.
+   * whose player is still connected. `publicRoom` (with `create`) lists the new room so
+   * strangers can find it; rooms are private (invite only) otherwise.
    */
-  | { type: 'JOIN'; version: number; player: PlayerProfile; seatHint?: string; seatKey?: string; create?: boolean }
+  | { type: 'JOIN'; version: number; player: PlayerProfile; seatHint?: string; seatKey?: string; create?: boolean; publicRoom?: boolean }
   | { type: 'ACTION'; action: GameAction }
   | { type: 'VOICE'; inVoice: boolean; muted: boolean; peerId?: string }
   | { type: 'PING' };
@@ -38,3 +39,18 @@ export type ServerMessage =
   /** You can't (or can no longer) be in this room. The connection closes after this. */
   | { type: 'REJECTED'; reason: string }
   | { type: 'PONG' };
+
+/** An open public room, as listed by the server's /rooms page. */
+export interface PublicRoom {
+  code: string;
+  /** The host's nickname. */
+  host: string;
+  /** People (not bots) in the room. */
+  humans: number;
+  players: number;
+  maxPlayers: number;
+  mode: 'SOLO' | 'TEAMS';
+  roundLimit: number;
+  /** How long the room has been open, in seconds. */
+  waitingFor: number;
+}

@@ -89,8 +89,40 @@ function originAllowed(origin: string | undefined): boolean {
   }
 }
 
+/** Open public lobbies: busiest first (so players gather), then the ones waiting longest. */
+function publicRooms() {
+  const list = [];
+  for (const { room } of rooms.values()) {
+    const entry = room.listing();
+    if (entry) list.push(entry);
+  }
+  list.sort((a, b) => b.humans - a.humans || b.waitingFor - a.waitingFor);
+  return list.slice(0, 20);
+}
+
+const listRequests = new Map<string, number[]>();
+function tooManyListRequests(ip: string): boolean {
+  const now = Date.now();
+  const times = (listRequests.get(ip) ?? []).filter((t) => now - t < 60_000);
+  times.push(now);
+  listRequests.set(ip, times);
+  return times.length > 60;
+}
+
 const server = http.createServer((req, res) => {
   const path = (req.url ?? '/').split('?')[0];
+  if (path === '/rooms' && req.method === 'GET') {
+    const origin = req.headers.origin;
+    const cors = { 'access-control-allow-origin': origin && originAllowed(origin) ? origin : ALLOWED_ORIGINS[0] ?? '*', vary: 'Origin' };
+    if (tooManyListRequests(clientIp(req))) {
+      res.writeHead(429, { ...SECURITY_HEADERS, ...cors, 'content-type': 'application/json' });
+      res.end('{"error":"slow down"}');
+      return;
+    }
+    res.writeHead(200, { ...SECURITY_HEADERS, ...cors, 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ rooms: publicRooms() }));
+    return;
+  }
   if (path === '/' || path === '/health') {
     // Also used to wake the server up before players connect
     res.writeHead(200, { ...SECURITY_HEADERS, 'content-type': 'text/plain; charset=utf-8', 'access-control-allow-origin': '*' });
@@ -161,6 +193,9 @@ setInterval(() => {
   });
   recentConnects.forEach((times, ip) => {
     if (!times.some((t) => now - t < 60_000)) recentConnects.delete(ip);
+  });
+  listRequests.forEach((times, ip) => {
+    if (!times.some((t) => now - t < 60_000)) listRequests.delete(ip);
   });
 }, 60_000).unref();
 
