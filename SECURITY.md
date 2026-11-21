@@ -11,7 +11,7 @@ We aim to reply within a week. Please give us a reasonable time to fix the probl
 
 ## What's in scope
 
-- The website at https://monopoly-cyan.vercel.app and its `/api/turn` function
+- The website at https://bazaar-ak.vercel.app and its `/api/turn` function
 - The game server (`server/`, running on Render)
 - The game code in this repository
 

@@ -9,11 +9,17 @@ import { ROOM_CODE_RE } from '../src/net/protocol';
  */
 
 const PORT = Number(process.env.PORT) || 8787;
+/** The game's own sites. The old address now redirects to the new one; both stay allowed. */
+const SITE_ORIGINS = ['https://bazaar-ak.vercel.app', 'https://monopoly-cyan.vercel.app'];
 /** Comma-separated sites allowed to connect, e.g. "https://my-game.vercel.app". Empty = any. */
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
+const configuredOrigins = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
   .map((s) => s.trim().replace(/\/$/, ''))
   .filter(Boolean);
+/** When a list is configured, the game's own sites are always on it (first = the main site). */
+const ALLOWED_ORIGINS = configuredOrigins.length
+  ? [...new Set([...SITE_ORIGINS, ...configuredOrigins])]
+  : [];
 /** An empty room is kept this long so players can come back to it. */
 const EMPTY_ROOM_TTL_MS = 2 * 3600_000;
 /** An empty room whose game never started is kept only this long. */

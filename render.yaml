@@ -13,4 +13,4 @@ services:
         value: "22"
       # Which sites may connect (comma-separated). Localhost and home-network addresses are always allowed.
       - key: ALLOWED_ORIGINS
-        value: https://monopoly-cyan.vercel.app
+        value: https://bazaar-ak.vercel.app,https://monopoly-cyan.vercel.app

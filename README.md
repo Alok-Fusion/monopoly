@@ -2,7 +2,7 @@
 
 An Indian-themed property-trading board game that runs entirely in the browser. Play against bots on one device, or create a room and share the link with friends anywhere (no sign-up).
 
-**Play it:** [monopoly-cyan.vercel.app](https://monopoly-cyan.vercel.app) · Made by [Alok Kushwaha](https://github.com/Alok-Fusion)
+**Play it:** [bazaar-ak.vercel.app](https://bazaar-ak.vercel.app) · Made by [Alok Kushwaha](https://github.com/Alok-Fusion)
 
 ## Features
 
@@ -70,7 +70,7 @@ The frontend stays on Vercel; the game server goes on [Render](https://render.co
    - **Build Command:** `npm install && npm run build`
    - **Start Command:** `npm start`
    - **Instance Type:** Free
-   - **Environment variable:** `ALLOWED_ORIGINS` = your site, e.g. `https://monopoly-cyan.vercel.app`
+   - **Environment variable:** `ALLOWED_ORIGINS` = your site, e.g. `https://bazaar-ak.vercel.app`
 
    Or choose **New** → **Blueprint**: [`render.yaml`](render.yaml) fills all of this in.
 4. When it's live, copy its address (like `https://bazaar-server.onrender.com`). Opening it should say "Bazaar game server is running".

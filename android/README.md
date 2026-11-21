@@ -2,7 +2,7 @@
 
 This folder is the Android app for Bazaar. It is a **Trusted Web Activity (TWA)**, made with
 Google's [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap). The app opens the live site
-`https://monopoly-cyan.vercel.app` full screen, using the Chrome installed on the phone.
+`https://bazaar-ak.vercel.app` full screen, using the Chrome installed on the phone.
 
 - Every Vercel deploy of `main` updates the app right away. A new Play release is only
   needed when something in this folder changes (name, icon, colours, package version).
@@ -46,7 +46,7 @@ then run `bubblewrap update` and `bubblewrap build` again.
 ## 3. Link the app to the website (Digital Asset Links)
 
 Without this, the app shows a browser address bar at the top. Android checks
-`https://monopoly-cyan.vercel.app/.well-known/assetlinks.json` for the app's signing
+`https://bazaar-ak.vercel.app/.well-known/assetlinks.json` for the app's signing
 certificate fingerprints.
 
 1. Upload the `.aab` to Play Console (Testing > Internal testing is fine). Play App Signing
@@ -62,7 +62,7 @@ certificate fingerprints.
    ```
 
 4. Commit and push `main`. Vercel serves the file. Check it opens in a browser at
-   `https://monopoly-cyan.vercel.app/.well-known/assetlinks.json`.
+   `https://bazaar-ak.vercel.app/.well-known/assetlinks.json`.
 5. Reinstall the app on a phone. The address bar should be gone.
 
 ## 4. Play Console checklist
@@ -72,7 +72,7 @@ certificate fingerprints.
   14 days before they can apply for production access.
 - Store listing: 512x512 icon (`store_icon.png` here), a 1024x500 feature graphic, and at
   least 2 phone screenshots.
-- Privacy policy URL: `https://monopoly-cyan.vercel.app/privacy`
+- Privacy policy URL: `https://bazaar-ak.vercel.app/privacy`
 - Data safety form: describe what the game actually sends (player names, chat messages and
   optional voice chat go through the game server and peer connections; no account sign-up).
 - Content rating questionnaire and target audience. The game has no real-money gambling.
