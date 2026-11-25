@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "esbuild": "^0.25.12",
-    "ws": "^8.18.0"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.8.7",
